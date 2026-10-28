@@ -1,6 +1,3 @@
-# GitHub の Web UI から `.github/workflows/android-build.yml` として追加してください。
-# （PAT に workflow 権限が無い場合の回避用）
-
 name: Android Debug APK
 
 on:
@@ -27,15 +24,12 @@ jobs:
           cache: gradle
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Install SDK packages
         run: |
-          sdkmanager --install \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
           yes | sdkmanager --licenses || true
+          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Build debug APK
         run: ./gradlew assembleDebug --stacktrace
