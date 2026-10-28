@@ -1,7 +1,9 @@
 package com.scriptplayer.app.player
 
 import android.app.Application
+import android.content.Intent
 import android.net.Uri
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.C
@@ -11,6 +13,10 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.exoplayer.ExoPlayer
+import com.scriptplayer.app.ScriptPlayerApplication
+import com.scriptplayer.app.data.StudyPreferences
+import com.scriptplayer.app.explain.LineExplainer
+import com.scriptplayer.app.playback.PlaybackService
 import com.scriptplayer.app.subtitle.BilingualAligner
 import com.scriptplayer.app.subtitle.BilingualCue
 import com.scriptplayer.app.subtitle.SrtParser
@@ -39,43 +45,79 @@ data class PlayerUiState(
     val durationMs: Long = 0L,
     val isPlaying: Boolean = false,
     val statusMessage: String = "動画を選んでください",
+    val repeatCount: Int = StudyPreferences.DEFAULT_REPEAT_COUNT,
+    val favoriteCueIndices: Set<Int> = emptySet(),
+    val showFavoritesOnly: Boolean = false,
+    val favoritePlaylistActive: Boolean = false,
+    val explanationTargetIndex: Int? = null,
+    val explanationText: String? = null,
+    val explanationFromCache: Boolean = false,
+    val explanationLoading: Boolean = false,
+    val explanationError: String? = null,
+    val apiKeyConfigured: Boolean = false,
 )
 
 class PlayerViewModel(application: Application) : AndroidViewModel(application) {
-    private val _uiState = MutableStateFlow(PlayerUiState())
+    private val app = application as ScriptPlayerApplication
+    private val studyPreferences = app.studyPreferences
+    private val favoriteStore = app.favoriteStore
+    private val explanationCache = app.explanationCache
+    private val lineExplainer = LineExplainer()
+
+    private val _uiState = MutableStateFlow(
+        PlayerUiState(
+            repeatCount = studyPreferences.repeatCount,
+            apiKeyConfigured = studyPreferences.geminiApiKey.isNotBlank(),
+        ),
+    )
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
 
-    val exoPlayer: ExoPlayer = ExoPlayer.Builder(application).build().apply {
-        playWhenReady = false
-        addListener(
-            object : Player.Listener {
-                override fun onIsPlayingChanged(isPlaying: Boolean) {
-                    _uiState.update { it.copy(isPlaying = isPlaying) }
-                }
+    val exoPlayer: ExoPlayer = app.playbackHolder.player
 
-                override fun onTracksChanged(tracks: Tracks) {
-                    refreshTrackOptions(tracks)
-                }
+    /** リピート用の区間（repeatCount > 1 のときだけ有効） */
+    private var segmentStartMs: Long? = null
+    private var segmentEndMs: Long? = null
+    private var segmentRepeatsRemaining: Int = 0
 
-                override fun onPlaybackStateChanged(playbackState: Int) {
-                    if (playbackState == Player.STATE_READY) {
-                        _uiState.update { it.copy(durationMs = exoPlayer.duration.coerceAtLeast(0L)) }
-                    }
-                }
-            },
-        )
+    private var favoritePlayQueue: List<Int>? = null
+    private var favoriteQueueStep: Int = 0
+    private var playbackMonitorJob: Job? = null
+
+    private val playerListener = object : Player.Listener {
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            _uiState.update { it.copy(isPlaying = isPlaying) }
+            if (isPlaying) {
+                ensurePlaybackService()
+            }
+        }
+
+        override fun onTracksChanged(tracks: Tracks) {
+            refreshTrackOptions(tracks)
+        }
+
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            if (playbackState == Player.STATE_READY) {
+                _uiState.update { it.copy(durationMs = exoPlayer.duration.coerceAtLeast(0L)) }
+            }
+        }
     }
 
-    private var segmentEndMs: Long? = null
-    private var segmentMonitorJob: Job? = null
+    init {
+        exoPlayer.addListener(playerListener)
+        startPlaybackMonitor()
+    }
 
     fun setVideo(uri: Uri, label: String) {
-        segmentEndMs = null
-        segmentMonitorJob?.cancel()
+        clearRepeatSegment()
+        favoritePlayQueue = null
+        favoriteQueueStep = 0
+        val favorites = favoriteStore.load(uri)
         _uiState.update {
             it.copy(
                 videoUri = uri,
                 videoLabel = label,
+                favoriteCueIndices = favorites,
+                favoritePlaylistActive = false,
                 statusMessage = "字幕ファイルを選ぶか、埋め込み字幕トラックを選んでください",
             )
         }
@@ -90,6 +132,52 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     fun setTranslationSrt(uri: Uri) {
         _uiState.update { it.copy(translationSrtUri = uri) }
         reloadCues()
+    }
+
+    fun setRepeatCount(count: Int) {
+        val clamped = count.coerceIn(StudyPreferences.MIN_REPEAT, StudyPreferences.MAX_REPEAT)
+        studyPreferences.repeatCount = clamped
+        _uiState.update { it.copy(repeatCount = clamped) }
+    }
+
+    fun cycleRepeatCount() {
+        val options = listOf(1, 2, 3, 5, 10, 20)
+        val current = _uiState.value.repeatCount
+        val next = options.firstOrNull { it > current } ?: options.first()
+        setRepeatCount(next)
+    }
+
+    fun setShowFavoritesOnly(show: Boolean) {
+        _uiState.update { it.copy(showFavoritesOnly = show) }
+    }
+
+    fun toggleFavorite(cueIndex: Int) {
+        val videoUri = _uiState.value.videoUri ?: return
+        val updated = favoriteStore.toggle(videoUri, cueIndex)
+        _uiState.update { it.copy(favoriteCueIndices = updated) }
+    }
+
+    fun playFavoritePlaylist() {
+        val indices = sortedFavoriteIndices()
+        if (indices.isEmpty()) {
+            _uiState.update { it.copy(statusMessage = "お気に入りがありません") }
+            return
+        }
+        favoritePlayQueue = indices
+        favoriteQueueStep = 0
+        _uiState.update {
+            it.copy(
+                favoritePlaylistActive = true,
+                statusMessage = "お気に入り ${indices.size} 行（飛ばしながら連続再生）",
+            )
+        }
+        playCueInternal(indices.first(), fromUser = true)
+    }
+
+    fun stopFavoritePlaylist() {
+        favoritePlayQueue = null
+        favoriteQueueStep = 0
+        _uiState.update { it.copy(favoritePlaylistActive = false) }
     }
 
     fun selectAudioTrack(option: MediaTrackOption) {
@@ -125,24 +213,23 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun playCue(index: Int) {
-        val cue = _uiState.value.cues.getOrNull(index) ?: return
-        segmentEndMs = cue.endMs
-        _uiState.update { it.copy(activeCueIndex = index) }
-        exoPlayer.seekTo(cue.startMs)
-        exoPlayer.playWhenReady = true
-        startSegmentMonitor()
+        favoritePlayQueue = null
+        favoriteQueueStep = 0
+        _uiState.update { it.copy(favoritePlaylistActive = false) }
+        playCueInternal(index, fromUser = true)
     }
 
     fun togglePlayPause() {
         if (exoPlayer.isPlaying) {
             exoPlayer.pause()
         } else {
-            segmentEndMs = null
             exoPlayer.play()
+            ensurePlaybackService()
         }
     }
 
     fun seekBy(deltaMs: Long) {
+        clearRepeatSegment()
         val target = (exoPlayer.currentPosition + deltaMs).coerceAtLeast(0L)
         exoPlayer.seekTo(target)
     }
@@ -150,6 +237,130 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     fun setSpeed(speed: Float) {
         exoPlayer.setPlaybackSpeed(speed)
         _uiState.update { it.copy(playbackSpeed = speed) }
+    }
+
+    fun saveGeminiApiKey(key: String) {
+        studyPreferences.geminiApiKey = key
+        _uiState.update { it.copy(apiKeyConfigured = key.isNotBlank()) }
+    }
+
+    fun dismissExplanation() {
+        _uiState.update {
+            it.copy(
+                explanationTargetIndex = null,
+                explanationText = null,
+                explanationFromCache = false,
+                explanationError = null,
+                explanationLoading = false,
+            )
+        }
+    }
+
+    fun openExplanation(cueIndex: Int) {
+        val videoUri = _uiState.value.videoUri
+        val cached = if (videoUri != null) explanationCache.get(videoUri, cueIndex) else null
+        _uiState.update {
+            it.copy(
+                explanationTargetIndex = cueIndex,
+                explanationText = cached,
+                explanationFromCache = cached != null,
+                explanationError = null,
+                explanationLoading = cached == null,
+            )
+        }
+        if (cached == null) {
+            fetchExplanation(cueIndex, forceRefresh = false)
+        }
+    }
+
+    fun refreshExplanation(cueIndex: Int) {
+        fetchExplanation(cueIndex, forceRefresh = true)
+    }
+
+    fun visibleCueIndices(): List<Int> {
+        val state = _uiState.value
+        if (!state.showFavoritesOnly) {
+            return state.cues.indices.toList()
+        }
+        return state.cues.indices.filter { state.favoriteCueIndices.contains(it) }
+    }
+
+    private fun fetchExplanation(cueIndex: Int, forceRefresh: Boolean) {
+        val state = _uiState.value
+        val cue = state.cues.getOrNull(cueIndex) ?: return
+        val videoUri = state.videoUri
+
+        if (!forceRefresh && videoUri != null) {
+            explanationCache.get(videoUri, cueIndex)?.let { cached ->
+                _uiState.update {
+                    it.copy(
+                        explanationTargetIndex = cueIndex,
+                        explanationText = cached,
+                        explanationFromCache = true,
+                        explanationLoading = false,
+                        explanationError = null,
+                    )
+                }
+                return
+            }
+        }
+
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    explanationTargetIndex = cueIndex,
+                    explanationLoading = true,
+                    explanationError = null,
+                    explanationText = if (forceRefresh) null else it.explanationText,
+                    explanationFromCache = false,
+                )
+            }
+            val result = lineExplainer.explain(
+                apiKey = studyPreferences.geminiApiKey,
+                primaryLine = cue.primary,
+                translationLine = cue.translation,
+            )
+            _uiState.update { ui ->
+                if (ui.explanationTargetIndex != cueIndex) return@update ui
+                result.fold(
+                    onSuccess = { text ->
+                        if (videoUri != null) {
+                            explanationCache.put(videoUri, cueIndex, text)
+                        }
+                        ui.copy(
+                            explanationLoading = false,
+                            explanationText = text,
+                            explanationFromCache = false,
+                            explanationError = null,
+                        )
+                    },
+                    onFailure = { err ->
+                        ui.copy(
+                            explanationLoading = false,
+                            explanationError = err.message ?: "解説に失敗しました",
+                        )
+                    },
+                )
+            }
+        }
+    }
+
+    private fun playCueInternal(index: Int, fromUser: Boolean) {
+        val cue = _uiState.value.cues.getOrNull(index) ?: return
+        val repeat = _uiState.value.repeatCount
+        if (repeat > 1) {
+            segmentStartMs = cue.startMs
+            segmentEndMs = cue.endMs
+            segmentRepeatsRemaining = repeat
+        } else {
+            clearRepeatSegment()
+        }
+        _uiState.update { it.copy(activeCueIndex = index) }
+        exoPlayer.seekTo(cue.startMs)
+        exoPlayer.playWhenReady = true
+        if (fromUser) {
+            ensurePlaybackService()
+        }
     }
 
     private fun rebuildMediaItem() {
@@ -250,20 +461,90 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private fun startSegmentMonitor() {
-        segmentMonitorJob?.cancel()
-        segmentMonitorJob = viewModelScope.launch {
+    private fun startPlaybackMonitor() {
+        playbackMonitorJob?.cancel()
+        playbackMonitorJob = viewModelScope.launch {
             while (isActive) {
-                val end = segmentEndMs
-                if (end != null && exoPlayer.currentPosition >= end - 40) {
-                    exoPlayer.pause()
-                    exoPlayer.seekTo(end)
-                    segmentEndMs = null
+                val pos = exoPlayer.currentPosition.coerceAtLeast(0L)
+                handleRepeatSegmentAt(pos)
+                maybeAdvanceFavoritePlaylist(pos)
+                _uiState.update {
+                    it.copy(
+                        positionMs = pos,
+                        activeCueIndex = cueIndexAt(pos, it.cues),
+                    )
                 }
-                _uiState.update { it.copy(positionMs = exoPlayer.currentPosition.coerceAtLeast(0L)) }
                 delay(80)
             }
         }
+    }
+
+    private fun handleRepeatSegmentAt(pos: Long) {
+        val end = segmentEndMs ?: return
+        if (pos < end - 40) return
+        if (segmentRepeatsRemaining > 1) {
+            segmentRepeatsRemaining--
+            val start = segmentStartMs ?: return
+            exoPlayer.seekTo(start)
+            exoPlayer.play()
+        } else {
+            clearRepeatSegment()
+        }
+    }
+
+    private fun maybeAdvanceFavoritePlaylist(pos: Long) {
+        val queue = favoritePlayQueue ?: return
+        if (segmentEndMs != null) return
+        if (favoriteQueueStep >= queue.size) return
+
+        val cueIndex = queue[favoriteQueueStep]
+        val cue = _uiState.value.cues.getOrNull(cueIndex) ?: return
+        if (pos < cue.endMs - 40) return
+
+        if (favoriteQueueStep >= queue.lastIndex) {
+            finishFavoritePlaylist()
+            return
+        }
+        favoriteQueueStep++
+        val nextCue = _uiState.value.cues.getOrNull(queue[favoriteQueueStep]) ?: return
+        exoPlayer.seekTo(nextCue.startMs)
+    }
+
+    private fun finishFavoritePlaylist() {
+        favoritePlayQueue = null
+        favoriteQueueStep = 0
+        _uiState.update {
+            it.copy(
+                favoritePlaylistActive = false,
+                statusMessage = "お気に入り区間の再生が終わりました（動画は続行）",
+            )
+        }
+    }
+
+    private fun cueIndexAt(positionMs: Long, cues: List<BilingualCue>): Int? {
+        cues.forEachIndexed { index, cue ->
+            if (positionMs in cue.startMs until cue.endMs) return index
+        }
+        return null
+    }
+
+    private fun sortedFavoriteIndices(): List<Int> {
+        val state = _uiState.value
+        return state.cues.indices.filter { state.favoriteCueIndices.contains(it) }.sorted()
+    }
+
+    private fun clearRepeatSegment() {
+        segmentStartMs = null
+        segmentEndMs = null
+        segmentRepeatsRemaining = 0
+    }
+
+    private fun ensurePlaybackService() {
+        val context = getApplication<Application>()
+        ContextCompat.startForegroundService(
+            context,
+            Intent(context, PlaybackService::class.java),
+        )
     }
 
     private fun readText(input: java.io.InputStream?): String? {
@@ -272,8 +553,8 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     override fun onCleared() {
-        segmentMonitorJob?.cancel()
-        exoPlayer.release()
+        playbackMonitorJob?.cancel()
+        exoPlayer.removeListener(playerListener)
         super.onCleared()
     }
 }

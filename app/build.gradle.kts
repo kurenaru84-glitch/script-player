@@ -12,8 +12,19 @@ android {
         applicationId = "com.scriptplayer.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 4
+        versionName = "0.2.1"
+        ndk {
+            // Phones only (skip x86-only APK confusion on some sideload paths).
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+        }
+    }
+
+    packaging {
+        jniLibs {
+            // Helps sideload on Android 15+ devices with 16 KB page size checks.
+            useLegacyPackaging = true
+        }
     }
 
     buildTypes {
@@ -52,6 +63,9 @@ dependencies {
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)
     implementation(libs.media3.common)
+    implementation(libs.media3.session)
+
+    implementation(libs.okhttp)
 
     debugImplementation(libs.androidx.compose.ui.tooling.preview)
 }
