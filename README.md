@@ -51,6 +51,16 @@ git remote add origin git@github.com:<your-user>/script-player.git
 git push -u origin main
 ```
 
+### PAT で workflow エラーが出る場合
+
+`without workflow scope` と出たら、まず **アプリ本体だけ push**（いまの repo は CI ファイルを外してあります）。  
+その後 GitHub サイト上で workflow を追加します（ブラウザログインなら PAT の workflow 権限不要）。
+
+1. リポジトリ → **Add file** → **Create new file**
+2. ファイル名: `.github/workflows/android-build.yml`
+3. 中身を `docs/android-build-workflow.yml` からコピペ
+4. **Commit directly to main**
+
 ### 3. APK を取る
 
 1. GitHub リポジトリ → **Actions**
