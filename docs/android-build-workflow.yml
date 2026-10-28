@@ -1,3 +1,6 @@
+# GitHub の Web UI から `.github/workflows/android-build.yml` として追加してください。
+# （PAT に workflow 権限が無い場合の回避用）
+
 name: Android Debug APK
 
 on:
