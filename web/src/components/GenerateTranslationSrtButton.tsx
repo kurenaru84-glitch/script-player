@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   cancelTranslationJob,
   resumeTranslationJobIfNeeded,
@@ -12,8 +12,6 @@ import {
 type Props = {
   mediaId: string;
   onComplete?: () => void;
-  /** バッチ保存のたび（デバウンス） */
-  onProgress?: () => void;
   variant?: "compact" | "panel";
   className?: string;
 };
@@ -21,27 +19,19 @@ type Props = {
 export function GenerateTranslationSrtButton({
   mediaId,
   onComplete,
-  onProgress,
   variant = "compact",
   className,
 }: Props) {
   const [progress, setProgress] = useState<TranslationProgress | null>(null);
   const [starting, setStarting] = useState(false);
-  const progressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastDone = useRef(0);
 
   useEffect(() => {
     void resumeTranslationJobIfNeeded(mediaId);
     return subscribeTranslationProgress(mediaId, (p) => {
       setProgress(p);
-      if (p.done > lastDone.current) {
-        lastDone.current = p.done;
-        if (progressTimer.current) clearTimeout(progressTimer.current);
-        progressTimer.current = setTimeout(() => onProgress?.(), 800);
-      }
       if (p.status === "done") onComplete?.();
     });
-  }, [mediaId, onComplete, onProgress]);
+  }, [mediaId, onComplete]);
 
   const run = useCallback(async () => {
     setStarting(true);

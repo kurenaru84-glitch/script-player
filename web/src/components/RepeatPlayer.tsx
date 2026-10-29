@@ -60,27 +60,31 @@ export function RepeatPlayer({ mediaId }: Props) {
   const lastScrolledIndex = useRef<number | null>(null);
   const lastActiveIndexRef = useRef<number | null>(null);
 
-  const reloadMetaOnly = useCallback(async () => {
-    setLoadError(null);
-    setLoadingMeta(true);
-    try {
-      const meta = await getMediaMeta(mediaId);
-      if (!meta) {
-        setLoadError("メディアが見つかりません");
-        return;
+  const reloadMetaOnly = useCallback(
+    async (opts?: { showLoading?: boolean }) => {
+      const showLoading = opts?.showLoading ?? true;
+      setLoadError(null);
+      if (showLoading) setLoadingMeta(true);
+      try {
+        const meta = await getMediaMeta(mediaId);
+        if (!meta) {
+          setLoadError("メディアが見つかりません");
+          return;
+        }
+        setTitle(meta.title);
+        setCues(
+          alignBilingual(parseSrt(meta.primarySrt), parseSrt(meta.translationSrt)),
+        );
+        setNotedIndices(await noteCueIndices(mediaId));
+        setFavoriteIndices(await favoriteCueIndices(mediaId));
+      } catch (e) {
+        setLoadError(e instanceof Error ? e.message : "読み込みに失敗しました");
+      } finally {
+        if (showLoading) setLoadingMeta(false);
       }
-      setTitle(meta.title);
-      setCues(
-        alignBilingual(parseSrt(meta.primarySrt), parseSrt(meta.translationSrt)),
-      );
-      setNotedIndices(await noteCueIndices(mediaId));
-      setFavoriteIndices(await favoriteCueIndices(mediaId));
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "読み込みに失敗しました");
-    } finally {
-      setLoadingMeta(false);
-    }
-  }, [mediaId]);
+    },
+    [mediaId],
+  );
 
   const loadVideoTrack = useCallback(async () => {
     const gen = ++videoLoadGen.current;
@@ -349,8 +353,7 @@ export function RepeatPlayer({ mediaId }: Props) {
             <GenerateTranslationSrtButton
               mediaId={mediaId}
               variant="compact"
-              onProgress={() => void reloadMetaOnly()}
-              onComplete={() => void reloadMetaOnly()}
+              onComplete={() => void reloadMetaOnly({ showLoading: false })}
             />
             <Link href={`/media/${mediaId}`} className="text-sky-600">
               設定
