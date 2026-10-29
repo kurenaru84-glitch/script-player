@@ -64,15 +64,42 @@ class ScriptPlayerDb extends Dexie {
         media: null,
       })
       .upgrade(async (tx) => {
-        const already = await tx.table("mediaMeta").count();
-        if (already > 0) return;
-        const legacy = await tx.table<LegacyMediaRow>("media").toArray();
-        for (const row of legacy) {
+        const legacyTable = tx.table<LegacyMediaRow>("media");
+        const legacyCount = await legacyTable.count();
+        if (legacyCount === 0) return;
+
+        const metaTable = tx.table("mediaMeta");
+        const migratedIds = new Set(await metaTable.toCollection().primaryKeys());
+
+        await legacyTable.each(async (row) => {
+          if (migratedIds.has(row.id)) return;
           const { videoBlob, ...meta } = row;
-          await tx.table("mediaMeta").put(meta);
+          await metaTable.put(meta);
           if (videoBlob) {
             await tx.table("videoBlobs").put({ id: row.id, videoBlob });
           }
+        });
+      });
+    this.version(4)
+      .stores({
+        mediaMeta: "id, createdAt, title",
+        videoBlobs: "id",
+        notes: "id, mediaId, updatedAt",
+        favorites: "id, mediaId, cueIndex",
+      })
+      .upgrade(async (tx) => {
+        const metaTable = tx.table("mediaMeta");
+        const blobIds = await tx.table("videoBlobs").toCollection().primaryKeys();
+        for (const id of blobIds) {
+          const meta = await metaTable.get(id);
+          if (meta) continue;
+          await metaTable.put({
+            id,
+            title: `復元 ${String(id).slice(0, 8)}`,
+            primarySrt: "",
+            translationSrt: "",
+            createdAt: Date.now(),
+          });
         }
       });
   }
@@ -88,6 +115,33 @@ export function getDb(): ScriptPlayerDb {
   return db;
 }
 
+/** 初回オープン（マイグレーション含む）を待つ */
+export async function openScriptPlayerDb(): Promise<ScriptPlayerDb> {
+  const d = getDb();
+  await d.open();
+  return d;
+}
+
+export type MediaListItem = Pick<MediaMeta, "id" | "title" | "createdAt">;
+
+export async function listMediaListItems(): Promise<MediaListItem[]> {
+  const d = await openScriptPlayerDb();
+  const rows = await d.mediaMeta.orderBy("createdAt").reverse().toArray();
+  return rows.map(({ id, title, createdAt }) => ({ id, title, createdAt }));
+}
+
+export async function getStorageDiagnostics(): Promise<{
+  mediaMetaCount: number;
+  videoBlobCount: number;
+}> {
+  const d = await openScriptPlayerDb();
+  const [mediaMetaCount, videoBlobCount] = await Promise.all([
+    d.mediaMeta.count(),
+    d.videoBlobs.count(),
+  ]);
+  return { mediaMetaCount, videoBlobCount };
+}
+
 export function noteId(mediaId: string, cueIndex: number): string {
   return `${mediaId}_${cueIndex}`;
 }
@@ -98,7 +152,8 @@ export function favoriteId(mediaId: string, cueIndex: number): string {
 
 /** My List 用 — 動画 Blob は読まない */
 export async function listMedia(): Promise<MediaMeta[]> {
-  return getDb().mediaMeta.orderBy("createdAt").reverse().toArray();
+  const d = await openScriptPlayerDb();
+  return d.mediaMeta.orderBy("createdAt").reverse().toArray();
 }
 
 export async function getMediaMeta(id: string): Promise<MediaMeta | undefined> {
@@ -125,6 +180,8 @@ export async function saveMedia(
   },
 ): Promise<string> {
   const id = input.id ?? crypto.randomUUID();
+  const { storeVideoBlob } = await import("@/lib/videoStorage/loadVideoBlob");
+  await storeVideoBlob(id, input.videoBlob);
   const existing = await getDb().mediaMeta.get(id);
   await getDb().mediaMeta.put({
     id,
@@ -133,8 +190,6 @@ export async function saveMedia(
     translationSrt: input.translationSrt,
     createdAt: existing?.createdAt ?? Date.now(),
   });
-  const { storeVideoBlob } = await import("@/lib/videoStorage/loadVideoBlob");
-  await storeVideoBlob(id, input.videoBlob);
   return id;
 }
 

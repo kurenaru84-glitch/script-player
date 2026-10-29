@@ -98,7 +98,7 @@ export default function LocalFilesPage() {
         onClick={() => void onSubmit()}
         className="w-full rounded-xl bg-sky-600 py-3 text-sm font-medium text-white disabled:opacity-50"
       >
-        {busy ? "保存中…" : "保存してプレイヤーを開く"}
+        {busy ? "保存中…（100MB 級は 1〜2 分かかることがあります）" : "保存してプレイヤーを開く"}
       </button>
     </div>
   );

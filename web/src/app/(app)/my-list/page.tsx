@@ -7,23 +7,39 @@ import { MobileAccessHint } from "@/components/MobileAccessHint";
 import { formatStorageError } from "@/lib/db/errors";
 import {
   deleteMedia,
-  listMedia,
+  getStorageDiagnostics,
+  listMediaListItems,
+  openScriptPlayerDb,
   updateMedia,
-  type MediaMeta,
+  type MediaListItem,
 } from "@/lib/db/clientDb";
 import { releaseVideoObjectUrl } from "@/lib/videoObjectUrlCache";
 
 export default function MyListPage() {
-  const [items, setItems] = useState<MediaMeta[]>([]);
+  const [items, setItems] = useState<MediaListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [diag, setDiag] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
-      setItems(await listMedia());
+      await openScriptPlayerDb();
+      setItems(await listMediaListItems());
+      const { mediaMetaCount, videoBlobCount } = await getStorageDiagnostics();
+      if (mediaMetaCount === 0 && videoBlobCount > 0) {
+        setDiag(
+          `一覧用データが空ですが動画 Blob が ${videoBlobCount} 件あります。アプリを更新したあと再度開いてください。`,
+        );
+      } else {
+        setDiag(null);
+      }
+    } catch (e) {
+      setError(formatStorageError(e));
+      setItems([]);
     } finally {
       setLoading(false);
     }
@@ -33,7 +49,7 @@ export default function MyListPage() {
     void refresh();
   }, [refresh]);
 
-  const startRename = (item: MediaMeta) => {
+  const startRename = (item: MediaListItem) => {
     setEditingId(item.id);
     setEditTitle(item.title);
     setError(null);
@@ -60,7 +76,19 @@ export default function MyListPage() {
 
       <InstallHint />
       <MobileAccessHint />
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
+          <p>{error}</p>
+          <button
+            type="button"
+            className="mt-2 underline"
+            onClick={() => void refresh()}
+          >
+            再読み込み
+          </button>
+        </div>
+      )}
+      {diag && <p className="text-sm text-amber-700 dark:text-amber-400">{diag}</p>}
 
       {loading ? (
         <p className="text-sm text-zinc-500">読み込み中…</p>
