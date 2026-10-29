@@ -14,6 +14,7 @@ import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.exoplayer.ExoPlayer
 import com.scriptplayer.app.ScriptPlayerApplication
+import com.scriptplayer.app.data.SavedVideo
 import com.scriptplayer.app.data.StudyPreferences
 import com.scriptplayer.app.explain.LineExplainer
 import com.scriptplayer.app.playback.PlaybackService
@@ -55,6 +56,9 @@ data class PlayerUiState(
     val explanationLoading: Boolean = false,
     val explanationError: String? = null,
     val apiKeyConfigured: Boolean = false,
+    val savedVideos: List<SavedVideo> = emptyList(),
+    val explanationUserNote: String = "",
+    val userNoteCueIndices: Set<Int> = emptySet(),
 )
 
 class PlayerViewModel(application: Application) : AndroidViewModel(application) {
@@ -62,6 +66,8 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val studyPreferences = app.studyPreferences
     private val favoriteStore = app.favoriteStore
     private val explanationCache = app.explanationCache
+    private val videoLibraryStore = app.videoLibraryStore
+    private val lineNoteStore = app.lineNoteStore
     private val lineExplainer = LineExplainer()
 
     private val _uiState = MutableStateFlow(
@@ -105,6 +111,10 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     init {
         exoPlayer.addListener(playerListener)
         startPlaybackMonitor()
+        viewModelScope.launch {
+            refreshSavedVideos()
+            videoLibraryStore.mostRecent()?.let { openSavedVideo(it, bumpLastOpened = false) }
+        }
     }
 
     fun setVideo(uri: Uri, label: String) {
@@ -112,26 +122,127 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         favoritePlayQueue = null
         favoriteQueueStep = 0
         val favorites = favoriteStore.load(uri)
+        val existing = videoLibraryStore.loadAll().find { it.videoUri == uri.toString() }
         _uiState.update {
             it.copy(
                 videoUri = uri,
                 videoLabel = label,
+                primarySrtUri = null,
+                translationSrtUri = null,
+                cues = emptyList(),
                 favoriteCueIndices = favorites,
                 favoritePlaylistActive = false,
                 statusMessage = "字幕ファイルを選ぶか、埋め込み字幕トラックを選んでください",
             )
         }
         rebuildMediaItem()
+        videoLibraryStore.upsert(
+            SavedVideo(
+                videoUri = uri.toString(),
+                label = label,
+                primarySrtUri = existing?.primarySrtUri,
+                translationSrtUri = existing?.translationSrtUri,
+            ),
+        )
+        refreshSavedVideos()
+        refreshUserNoteIndices(uri)
+        existing?.primarySrtUri?.let { applySavedSrt(Uri.parse(it), primary = true) }
+        existing?.translationSrtUri?.let { applySavedSrt(Uri.parse(it), primary = false) }
+    }
+
+    fun openSavedVideo(entry: SavedVideo, bumpLastOpened: Boolean = true) {
+        val uri = Uri.parse(entry.videoUri)
+        if (!canReadUri(uri)) {
+            _uiState.update {
+                it.copy(
+                    statusMessage = "「${entry.label}」へのアクセスが切れています。もう一度「動画」から選び直してください",
+                )
+            }
+            return
+        }
+        clearRepeatSegment()
+        favoritePlayQueue = null
+        favoriteQueueStep = 0
+        val favorites = favoriteStore.load(uri)
+        _uiState.update {
+            it.copy(
+                videoUri = uri,
+                videoLabel = entry.label,
+                primarySrtUri = null,
+                translationSrtUri = null,
+                cues = emptyList(),
+                favoriteCueIndices = favorites,
+                favoritePlaylistActive = false,
+                statusMessage = "字幕を読み込み中…",
+            )
+        }
+        rebuildMediaItem()
+        if (bumpLastOpened) {
+            videoLibraryStore.upsert(entry)
+            refreshSavedVideos()
+        }
+        entry.primarySrtUri?.let { applySavedSrt(Uri.parse(it), primary = true) }
+        entry.translationSrtUri?.let { applySavedSrt(Uri.parse(it), primary = false) }
+        refreshUserNoteIndices(uri)
+        if (_uiState.value.cues.isEmpty()) {
+            _uiState.update {
+                it.copy(statusMessage = "字幕ファイルを選ぶか、埋め込み字幕トラックを選んでください")
+            }
+        }
+    }
+
+    fun removeSavedVideo(videoUri: String) {
+        videoLibraryStore.remove(videoUri)
+        refreshSavedVideos()
     }
 
     fun setPrimarySrt(uri: Uri) {
         _uiState.update { it.copy(primarySrtUri = uri) }
         reloadCues()
+        persistSubtitlesToLibrary()
     }
 
     fun setTranslationSrt(uri: Uri) {
         _uiState.update { it.copy(translationSrtUri = uri) }
         reloadCues()
+        persistSubtitlesToLibrary()
+    }
+
+    private fun applySavedSrt(uri: Uri, primary: Boolean) {
+        if (!canReadUri(uri)) return
+        if (primary) {
+            _uiState.update { it.copy(primarySrtUri = uri) }
+        } else {
+            _uiState.update { it.copy(translationSrtUri = uri) }
+        }
+        reloadCues()
+    }
+
+    private fun persistSubtitlesToLibrary() {
+        val state = _uiState.value
+        val videoUri = state.videoUri?.toString() ?: return
+        videoLibraryStore.upsert(
+            SavedVideo(
+                videoUri = videoUri,
+                label = state.videoLabel.ifBlank { "video" },
+                primarySrtUri = state.primarySrtUri?.toString(),
+                translationSrtUri = state.translationSrtUri?.toString(),
+            ),
+        )
+        refreshSavedVideos()
+    }
+
+    private fun refreshSavedVideos() {
+        _uiState.update { it.copy(savedVideos = videoLibraryStore.loadAll()) }
+    }
+
+    private fun canReadUri(uri: Uri): Boolean {
+        val resolver = getApplication<Application>().contentResolver
+        val persisted = resolver.persistedUriPermissions.any { perm ->
+            perm.uri == uri && perm.isReadPermission
+        }
+        if (persisted) return true
+        return runCatching { resolver.openInputStream(uri)?.use { } }.isSuccess
     }
 
     fun setRepeatCount(count: Int) {
@@ -252,6 +363,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 explanationFromCache = false,
                 explanationError = null,
                 explanationLoading = false,
+                explanationUserNote = "",
             )
         }
     }
@@ -259,18 +371,37 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     fun openExplanation(cueIndex: Int) {
         val videoUri = _uiState.value.videoUri
         val cached = if (videoUri != null) explanationCache.get(videoUri, cueIndex) else null
+        val userNote = if (videoUri != null) lineNoteStore.get(videoUri, cueIndex).orEmpty() else ""
         _uiState.update {
             it.copy(
                 explanationTargetIndex = cueIndex,
                 explanationText = cached,
                 explanationFromCache = cached != null,
                 explanationError = null,
-                explanationLoading = cached == null,
+                explanationLoading = cached == null && userNote.isBlank(),
+                explanationUserNote = userNote,
             )
         }
-        if (cached == null) {
+        if (cached == null && _uiState.value.apiKeyConfigured) {
             fetchExplanation(cueIndex, forceRefresh = false)
+        } else if (cached == null && !_uiState.value.apiKeyConfigured) {
+            _uiState.update { it.copy(explanationLoading = false) }
         }
+    }
+
+    fun saveUserNote(cueIndex: Int, text: String) {
+        val videoUri = _uiState.value.videoUri ?: return
+        lineNoteStore.put(videoUri, cueIndex, text)
+        refreshUserNoteIndices(videoUri)
+        _uiState.update { it.copy(explanationUserNote = text.trim()) }
+    }
+
+    private fun refreshUserNoteIndices(videoUri: Uri? = _uiState.value.videoUri) {
+        if (videoUri == null) {
+            _uiState.update { it.copy(userNoteCueIndices = emptySet()) }
+            return
+        }
+        _uiState.update { it.copy(userNoteCueIndices = lineNoteStore.indicesWithNotes(videoUri)) }
     }
 
     fun refreshExplanation(cueIndex: Int) {

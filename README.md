@@ -1,10 +1,16 @@
 # Script Player
 
-MediaDict の Repeat Player に近い、Android 向け学習プレイヤー（MVP）。
+MediaDict の Repeat Player に近い語学学習プレイヤー。
+
+| 版 | 場所 | デプロイ |
+|---|---|---|
+| **Web（PWA）** | [`web/`](web/) — Next.js + Tailwind | **GitHub → Vercel**（Root Directory = `web`）→ スマホで URL → ホーム画面に追加 |
+| **Android** | `app/` — Kotlin + Compose | Android Studio / GitHub Actions APK |
 
 ## できること（v0.2）
 
-- ローカル動画を開く
+- ローカル動画を開く（**一度選んだ動画は保存**・起動時に前回の動画を自動で開く・**保存一覧**から切替）
+- 学習／翻訳 SRT も動画ごとに記憶（次回から自動で読み込み）
 - **学習用字幕 SRT** と **翻訳字幕 SRT** を選び、セリフ一覧に **常時2行表示**
 - セリフ行タップでその区間を再生（終端で停止）
 - **リピート**（1 / 2 / 3 / 5 / 10 / 20 回をタップで切替）
@@ -20,6 +26,15 @@ MediaDict の Repeat Player に近い、Android 向け学習プレイヤー（MV
 - 埋め込み字幕からスクリプト一覧を自動生成（今は SRT から一覧を作る）
 - 同フォルダ SRT の自動検出
 - 辞書連携、RewindSub 風の細かい UI
+
+## Web をスマホで使う（ピクスピと同じ流れ）
+
+詳細は [`web/README.md`](web/README.md)。
+
+1. GitHub に push
+2. [Vercel](https://vercel.com) で Import → **Root Directory = `web`**
+3. Deploy → PC で `https://….vercel.app` を確認
+4. URL をスマホに送る → **ホーム画面に追加**
 
 ## 開発環境（W 側で必要）
 

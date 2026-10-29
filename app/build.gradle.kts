@@ -12,8 +12,8 @@ android {
         applicationId = "com.scriptplayer.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.2.1"
+        versionCode = 7
+        versionName = "0.2.4"
         ndk {
             // Phones only (skip x86-only APK confusion on some sideload paths).
             abiFilters += listOf("armeabi-v7a", "arm64-v8a")

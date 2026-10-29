@@ -57,7 +57,13 @@ class LineExplainer(
             )
             .put(
                 "generationConfig",
-                JSONObject().put("temperature", 0.4),
+                JSONObject()
+                    .put("temperature", 0.4)
+                    .put("maxOutputTokens", 768)
+                    .put(
+                        "thinkingConfig",
+                        JSONObject().put("thinkingLevel", "low"),
+                    ),
             )
             .toString()
             .toRequestBody("application/json".toMediaType())
@@ -93,7 +99,7 @@ class LineExplainer(
     }
 
     companion object {
-        /** gemini-2.0-flash shut down 2026-06-01; see Gemini API deprecations. */
-        const val DEFAULT_MODEL = "gemini-3.8-flash"
+        /** セリフ解説向け: 3.8 より軽い Flash（日常タスク向け） */
+        const val DEFAULT_MODEL = "gemini-3.6-flash"
     }
 }

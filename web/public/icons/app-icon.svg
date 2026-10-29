@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Script Player">
+  <rect width="512" height="512" rx="96" fill="#0284c7"/>
+  <path fill="#fff" d="M128 160h256v32H128zm0 80h200v32H128zm0 80h256v32H128zm0 80h160v32H128z"/>
+  <path fill="#bae6fd" d="M352 288l64 48-64 48V288z"/>
+</svg>

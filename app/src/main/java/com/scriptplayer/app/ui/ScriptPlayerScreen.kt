@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -23,8 +24,10 @@ import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.AlertDialog
@@ -33,6 +36,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -58,6 +62,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.ui.PlayerView
+import com.scriptplayer.app.data.SavedVideo
 import com.scriptplayer.app.player.PlayerViewModel
 import com.scriptplayer.app.subtitle.BilingualCue
 
@@ -132,6 +137,29 @@ fun ScriptPlayerScreen(viewModel: PlayerViewModel) {
             )
             IconButton(onClick = { showSettings = true }) {
                 Icon(Icons.Default.Settings, contentDescription = "設定")
+            }
+        }
+
+        if (state.savedVideos.isNotEmpty()) {
+            Text(
+                text = "保存した動画",
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 168.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                state.savedVideos.forEach { entry ->
+                    SavedVideoRow(
+                        entry = entry,
+                        selected = state.videoUri?.toString() == entry.videoUri,
+                        onOpen = { viewModel.openSavedVideo(entry) },
+                        onRemove = { viewModel.removeSavedVideo(entry.videoUri) },
+                    )
+                }
             }
         }
 
@@ -219,6 +247,7 @@ fun ScriptPlayerScreen(viewModel: PlayerViewModel) {
                     cue = cue,
                     active = state.activeCueIndex == index,
                     favorite = state.favoriteCueIndices.contains(index),
+                    hasUserNote = state.userNoteCueIndices.contains(index),
                     onPlay = { viewModel.playCue(index) },
                     onToggleFavorite = { viewModel.toggleFavorite(index) },
                     onExplain = { viewModel.openExplanation(index) },
@@ -288,6 +317,10 @@ fun ScriptPlayerScreen(viewModel: PlayerViewModel) {
     if (explainIndex != null) {
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         val cue = state.cues.getOrNull(explainIndex)
+        var noteDraft by remember(explainIndex) { mutableStateOf(state.explanationUserNote) }
+        LaunchedEffect(explainIndex, state.explanationUserNote) {
+            noteDraft = state.explanationUserNote
+        }
         ModalBottomSheet(
             onDismissRequest = viewModel::dismissExplanation,
             sheetState = sheetState,
@@ -303,9 +336,9 @@ fun ScriptPlayerScreen(viewModel: PlayerViewModel) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("セリフ解説", style = MaterialTheme.typography.titleMedium)
+                    Text("セリフ解説・メモ", style = MaterialTheme.typography.titleMedium)
                     if (state.explanationFromCache && state.explanationText != null) {
-                        Text("保存済み", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                        Text("AI保存済み", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                     }
                 }
                 cue?.let {
@@ -313,6 +346,37 @@ fun ScriptPlayerScreen(viewModel: PlayerViewModel) {
                     if (it.translation.isNotBlank()) {
                         Text(it.translation, color = Color.Gray)
                     }
+                }
+                Text("自分のメモ", style = MaterialTheme.typography.labelLarge)
+                OutlinedTextField(
+                    value = noteDraft,
+                    onValueChange = { noteDraft = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("単語・文法メモなど（端末に保存）") },
+                    minLines = 3,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = {
+                        noteDraft = ""
+                        viewModel.saveUserNote(explainIndex, "")
+                    }) {
+                        Text("メモ削除")
+                    }
+                    Button(onClick = { viewModel.saveUserNote(explainIndex, noteDraft) }) {
+                        Text("メモ保存")
+                    }
+                }
+                HorizontalDivider()
+                Text("AI 解説（Gemini Flash）", style = MaterialTheme.typography.labelLarge)
+                if (!state.apiKeyConfigured) {
+                    Text(
+                        "API キー未設定のときはメモだけ使えます。設定からキーを入れると AI 解説も利用できます。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray,
+                    )
                 }
                 when {
                     state.explanationLoading -> {
@@ -323,19 +387,28 @@ fun ScriptPlayerScreen(viewModel: PlayerViewModel) {
                     }
                     state.explanationError != null -> {
                         Text(state.explanationError!!, color = Color(0xFFAA2222))
-                        if (!state.apiKeyConfigured) {
-                            Text("右上の設定から API キーを入力してください。", style = MaterialTheme.typography.bodySmall)
-                        }
-                        Button(onClick = { viewModel.refreshExplanation(explainIndex) }) {
-                            Text("再試行")
+                        if (state.apiKeyConfigured) {
+                            Button(onClick = { viewModel.refreshExplanation(explainIndex) }) {
+                                Text("再試行")
+                            }
                         }
                     }
                     state.explanationText != null -> {
                         Text(state.explanationText!!)
-                        if (!state.explanationLoading) {
+                        if (!state.explanationLoading && state.apiKeyConfigured) {
                             TextButton(onClick = { viewModel.refreshExplanation(explainIndex) }) {
                                 Text("再生成")
                             }
+                        }
+                    }
+                    state.apiKeyConfigured -> {
+                        Text(
+                            "「再生成」で AI 解説を取得できます。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray,
+                        )
+                        TextButton(onClick = { viewModel.refreshExplanation(explainIndex) }) {
+                            Text("AI 解説を生成")
                         }
                     }
                 }
@@ -415,6 +488,7 @@ private fun CueRow(
     cue: BilingualCue,
     active: Boolean,
     favorite: Boolean,
+    hasUserNote: Boolean,
     onPlay: () -> Unit,
     onToggleFavorite: () -> Unit,
     onExplain: () -> Unit,
@@ -458,7 +532,59 @@ private fun CueRow(
                 )
             }
             IconButton(onClick = onExplain) {
-                Icon(Icons.Outlined.Info, contentDescription = "解説", tint = Color(0xFF336699))
+                Icon(
+                    imageVector = if (hasUserNote) Icons.Outlined.EditNote else Icons.Outlined.Info,
+                    contentDescription = "解説・メモ",
+                    tint = if (hasUserNote) Color(0xFF2E7D32) else Color(0xFF336699),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SavedVideoRow(
+    entry: SavedVideo,
+    selected: Boolean,
+    onOpen: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    val subtitleHint = buildString {
+        if (entry.primarySrtUri != null) append("学習")
+        if (entry.translationSrtUri != null) {
+            if (isNotEmpty()) append("・")
+            append("翻訳")
+        }
+        if (isEmpty()) append("字幕未設定")
+    }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpen),
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = if (selected) Color(0xFFE3F2FD) else Color.White,
+        ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = entry.label,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                )
+                Text(
+                    text = subtitleHint,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray,
+                )
+            }
+            IconButton(onClick = onRemove) {
+                Icon(Icons.Default.Close, contentDescription = "一覧から削除", tint = Color.Gray)
             }
         }
     }
