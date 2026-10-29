@@ -23,3 +23,19 @@ export type FavoriteRecord = {
   mediaId: string;
   cueIndex: number;
 };
+
+/** AI 翻訳 SRT の途中経過（再開・バックグラウンド用） */
+export type TranslationJobRecord = {
+  id: string;
+  mediaId: string;
+  /** primarySrt の簡易指紋（差し替え検知） */
+  sourceFingerprint: string;
+  totalCues: number;
+  /** 翻訳済み行数（0..totalCues） */
+  doneCues: number;
+  /** 各行の翻訳（未着手は空文字） */
+  lines: string[];
+  status: "running" | "paused" | "done" | "error";
+  errorMessage?: string;
+  updatedAt: number;
+};

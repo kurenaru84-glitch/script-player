@@ -1,4 +1,5 @@
-import { geminiGenerateText, parseJsonArray } from "./generateContent";
+import { parseJsonArray } from "./generateContent";
+import { geminiGenerateTextWithFallback } from "./generateContentWithFallback";
 
 export async function translateSubtitleLines(
   lines: string[],
@@ -21,7 +22,7 @@ ${source}の字幕行を${target}に翻訳してください。
 入力:
 ${JSON.stringify(numbered.map((x) => x.text))}`;
 
-  const raw = await geminiGenerateText(prompt);
+  const raw = await geminiGenerateTextWithFallback(prompt);
   const translated = parseJsonArray(raw);
   if (translated.length !== lines.length) {
     throw new Error(

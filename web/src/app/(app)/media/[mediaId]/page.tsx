@@ -80,9 +80,16 @@ export default function MediaPropertiesPage() {
     <div className="space-y-5 pb-8">
       <div className="flex items-center justify-between gap-2">
         <h1 className="text-xl font-semibold">プロパティ</h1>
-        <Link href="/my-list" className="text-sm text-sky-600">
-          My List
-        </Link>
+        <div className="flex items-center gap-2">
+          <GenerateTranslationSrtButton
+            mediaId={mediaId}
+            variant="compact"
+            onComplete={() => router.push(`/player/${mediaId}`)}
+          />
+          <Link href="/my-list" className="text-sm text-sky-600">
+            My List
+          </Link>
+        </div>
       </div>
 
       <label className="block space-y-1 text-sm">
@@ -102,10 +109,9 @@ export default function MediaPropertiesPage() {
         タイトル保存
       </button>
 
-      <hr className="border-zinc-200 dark:border-zinc-700" />
-
       <GenerateTranslationSrtButton
         mediaId={mediaId}
+        variant="panel"
         onComplete={() => router.push(`/player/${mediaId}`)}
       />
 

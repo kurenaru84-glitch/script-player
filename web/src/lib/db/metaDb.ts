@@ -1,11 +1,17 @@
 import Dexie, { type EntityTable } from "dexie";
-import type { FavoriteRecord, MediaMeta, VocabNote } from "@/lib/db/types";
+import type {
+  FavoriteRecord,
+  MediaMeta,
+  TranslationJobRecord,
+  VocabNote,
+} from "@/lib/db/types";
 
 /** 字幕・メモのみ。動画 Blob は載せない → My List は即開く */
 class ScriptPlayerMetaDb extends Dexie {
   mediaMeta!: EntityTable<MediaMeta, "id">;
   notes!: EntityTable<VocabNote, "id">;
   favorites!: EntityTable<FavoriteRecord, "id">;
+  translationJobs!: EntityTable<TranslationJobRecord, "id">;
 
   constructor() {
     super("scriptPlayerMeta");
@@ -13,6 +19,12 @@ class ScriptPlayerMetaDb extends Dexie {
       mediaMeta: "id, createdAt, title",
       notes: "id, mediaId, updatedAt",
       favorites: "id, mediaId, cueIndex",
+    });
+    this.version(2).stores({
+      mediaMeta: "id, createdAt, title",
+      notes: "id, mediaId, updatedAt",
+      favorites: "id, mediaId, cueIndex",
+      translationJobs: "id, mediaId, status, updatedAt",
     });
   }
 }

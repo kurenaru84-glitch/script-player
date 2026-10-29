@@ -53,6 +53,8 @@ export function RepeatPlayer({ mediaId }: Props) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
   const [videoPlayError, setVideoPlayError] = useState<string | null>(null);
+  const [memoOpenIndex, setMemoOpenIndex] = useState<number | null>(null);
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const videoLoadGen = useRef(0);
   const noteFocusedRef = useRef(false);
   const lastScrolledIndex = useRef<number | null>(null);
@@ -126,13 +128,6 @@ export function RepeatPlayer({ mediaId }: Props) {
     if (cues[initialCue]) setSelectedIndex(initialCue);
   }, [cues, initialCue]);
 
-  /** 再生中は喋っている行、停止中は選択行 */
-  const memoLineIndex = useMemo(() => {
-    if (isPlaying && activeIndex != null) return activeIndex;
-    if (selectedIndex != null) return selectedIndex;
-    return activeIndex;
-  }, [activeIndex, isPlaying, selectedIndex]);
-
   const scrollLineIndex = useMemo(() => {
     if (isPlaying) {
       if (activeIndex != null) return activeIndex;
@@ -142,20 +137,18 @@ export function RepeatPlayer({ mediaId }: Props) {
     return activeIndex;
   }, [activeIndex, isPlaying, selectedIndex]);
 
-  const memoCue = memoLineIndex != null ? cues[memoLineIndex] ?? null : null;
-
   useEffect(() => {
-    if (memoLineIndex == null) {
+    if (memoOpenIndex == null) {
       setNoteDraft("");
       return;
     }
     if (noteFocusedRef.current) return;
-    const cue = cues[memoLineIndex];
+    const cue = cues[memoOpenIndex];
     if (!cue) return;
-    getNote(mediaId, memoLineIndex).then((n) => {
+    getNote(mediaId, memoOpenIndex).then((n) => {
       setNoteDraft(n?.body ?? "");
     });
-  }, [mediaId, memoLineIndex, cues]);
+  }, [mediaId, memoOpenIndex, cues]);
 
   const findActiveIndex = useCallback(
     (timeSec: number): number | null => {
@@ -296,17 +289,30 @@ export function RepeatPlayer({ mediaId }: Props) {
   };
 
   const saveCurrentNote = async () => {
-    if (memoLineIndex == null) return;
-    const cue = cues[memoLineIndex];
+    if (memoOpenIndex == null) return;
+    const cue = cues[memoOpenIndex];
     if (!cue) return;
     await saveNote({
       mediaId,
-      cueIndex: memoLineIndex,
+      cueIndex: memoOpenIndex,
       primaryLine: cue.primary,
       translationLine: cue.translation,
       body: noteDraft,
     });
     setNotedIndices(await noteCueIndices(mediaId));
+  };
+
+  const copyCueLines = async (index: number) => {
+    const cue = cues[index];
+    if (!cue) return;
+    const text = [cue.primary, cue.translation].filter(Boolean).join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedIndex(index);
+      setTimeout(() => setCopiedIndex((v) => (v === index ? null : v)), 1500);
+    } catch {
+      setVideoPlayError("クリップボードにコピーできませんでした");
+    }
   };
 
   const overlayCue = useMemo(() => {
@@ -338,8 +344,14 @@ export function RepeatPlayer({ mediaId }: Props) {
       style={{ height: PLAYER_HEIGHT, maxHeight: PLAYER_HEIGHT }}
     >
       <div className="flex shrink-0 items-center justify-between gap-2 pb-2">
-          <h1 className="truncate text-lg font-semibold">{title}</h1>
-          <div className="flex shrink-0 gap-2 text-sm">
+          <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">{title}</h1>
+          <div className="flex shrink-0 items-center gap-2 text-sm">
+            <GenerateTranslationSrtButton
+              mediaId={mediaId}
+              variant="compact"
+              onProgress={() => void reloadMetaOnly()}
+              onComplete={() => void reloadMetaOnly()}
+            />
             <Link href={`/media/${mediaId}`} className="text-sky-600">
               設定
             </Link>
@@ -449,46 +461,6 @@ export function RepeatPlayer({ mediaId }: Props) {
             </div>
           </div>
 
-        {memoCue && (
-          <div className="rounded-lg border border-emerald-200/80 bg-emerald-50/90 p-2 dark:border-emerald-900/60 dark:bg-emerald-950/40">
-            <div className="flex items-baseline justify-between gap-2">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-300">
-                学習メモ #{memoCue.index}
-                {isPlaying && activeIndex === memoLineIndex && (
-                  <span className="ml-1 font-normal normal-case text-emerald-600">
-                    · 再生中のセリフ
-                  </span>
-                )}
-              </p>
-              {notedIndices.has(memoLineIndex!) && (
-                <span className="text-[10px] text-emerald-700">保存済</span>
-              )}
-            </div>
-            <p className="mt-0.5 line-clamp-2 text-xs text-zinc-700 dark:text-zinc-300">
-              {memoCue.primary}
-            </p>
-            <textarea
-              value={noteDraft}
-              onChange={(e) => setNoteDraft(e.target.value)}
-              onFocus={() => {
-                noteFocusedRef.current = true;
-              }}
-              onBlur={() => {
-                noteFocusedRef.current = false;
-              }}
-              rows={2}
-              placeholder="このセリフのメモ…"
-              className="mt-1.5 w-full rounded-lg border border-emerald-200/80 bg-white p-2 text-sm dark:border-emerald-900 dark:bg-zinc-950"
-            />
-            <button
-              type="button"
-              onClick={() => void saveCurrentNote()}
-              className="mt-1.5 rounded-lg bg-emerald-600 px-3 py-1 text-xs font-medium text-white"
-            >
-              メモ保存
-            </button>
-          </div>
-        )}
       </div>
 
       <div className="mt-2 flex shrink-0 flex-wrap gap-2">
@@ -524,12 +496,6 @@ export function RepeatPlayer({ mediaId }: Props) {
           )}
       </div>
 
-      <GenerateTranslationSrtButton
-        mediaId={mediaId}
-        onComplete={() => void reloadMetaOnly()}
-        className="mt-2 shrink-0"
-      />
-
       <div
         ref={listRef}
         className="mt-2 min-h-0 flex-1 overflow-y-auto overscroll-contain"
@@ -541,21 +507,26 @@ export function RepeatPlayer({ mediaId }: Props) {
             const selected = selectedIndex === index;
             const hasNote = notedIndices.has(index);
             const favorite = favoriteIndices.has(index);
+            const memoOpen = memoOpenIndex === index;
             return (
               <div
                 key={`${cue.index}-${cue.startMs}`}
                 data-cue-index={index}
-                className={`flex scroll-my-[min(32vh,220px)] gap-1 rounded-xl border transition-colors duration-200 ${
+                className={`scroll-my-[min(32vh,220px)] rounded-xl border transition-colors duration-200 ${
                   speaking
                     ? "scale-[1.02] border-sky-500 bg-sky-100 shadow-md ring-2 ring-sky-400 dark:border-sky-400 dark:bg-sky-900/70"
-                    : selected
+                    : selected || memoOpen
                       ? "border-sky-300 bg-sky-50/80 dark:border-sky-700 dark:bg-sky-950/50"
                       : "border-transparent bg-white opacity-75 dark:bg-zinc-950 dark:opacity-70"
                 }`}
               >
+                <div className="flex gap-0.5">
                 <button
                   type="button"
-                  onClick={() => playCue(index)}
+                  onClick={() => {
+                    playCue(index);
+                    setMemoOpenIndex((prev) => (prev === index ? null : index));
+                  }}
                   className="min-w-0 flex-1 px-3 py-3 text-left active:scale-[0.99]"
                 >
                   <div
@@ -596,14 +567,60 @@ export function RepeatPlayer({ mediaId }: Props) {
                 </button>
                 <button
                   type="button"
+                  aria-label="セリフをコピー"
+                  title="英日テキストをコピー"
+                  className="px-2 text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void copyCueLines(index);
+                  }}
+                >
+                  {copiedIndex === index ? "✓" : "⎘"}
+                </button>
+                <button
+                  type="button"
                   aria-label="お気に入り"
-                  className="px-3 text-lg leading-none"
-                  onClick={async () => {
+                  className="px-2 text-lg leading-none"
+                  onClick={async (e) => {
+                    e.stopPropagation();
                     setFavoriteIndices(await toggleFavorite(mediaId, index));
                   }}
                 >
                   {favorite ? "★" : "☆"}
                 </button>
+                </div>
+                {memoOpen && (
+                  <div className="border-t border-emerald-200/80 px-3 py-2 dark:border-emerald-900/60">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[10px] font-semibold text-emerald-800 dark:text-emerald-300">
+                        メモ #{cue.index}
+                      </p>
+                      {hasNote && (
+                        <span className="text-[10px] text-emerald-700">保存済</span>
+                      )}
+                    </div>
+                    <textarea
+                      value={noteDraft}
+                      onChange={(e) => setNoteDraft(e.target.value)}
+                      onFocus={() => {
+                        noteFocusedRef.current = true;
+                      }}
+                      onBlur={() => {
+                        noteFocusedRef.current = false;
+                      }}
+                      rows={2}
+                      placeholder="このセリフのメモ…"
+                      className="mt-1 w-full rounded-lg border border-emerald-200/80 bg-white p-2 text-sm dark:border-emerald-900 dark:bg-zinc-950"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void saveCurrentNote()}
+                      className="mt-1 rounded-lg bg-emerald-600 px-3 py-1 text-xs font-medium text-white"
+                    >
+                      メモ保存
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })}

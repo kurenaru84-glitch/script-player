@@ -1,0 +1,47 @@
+import { backoffMs, isRetryableGeminiError, sleep } from "@/lib/gemini/retryableError";
+
+const MAX_CLIENT_RETRIES = 8;
+
+export async function translateLinesViaApi(lines: string[]): Promise<string[]> {
+  if (lines.length === 0) return [];
+  try {
+    return await fetchBatchWithRetries(lines);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (isRetryableGeminiError(msg) && lines.length > 1) {
+      const mid = Math.ceil(lines.length / 2);
+      const left = await translateLinesViaApi(lines.slice(0, mid));
+      const right = await translateLinesViaApi(lines.slice(mid));
+      return [...left, ...right];
+    }
+    throw e;
+  }
+}
+
+async function fetchBatchWithRetries(lines: string[]): Promise<string[]> {
+  let attempt = 0;
+  while (true) {
+    attempt += 1;
+    const res = await fetch("/api/translate-srt-batch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lines }),
+    });
+    const data = (await res.json()) as {
+      translations?: string[];
+      error?: string;
+    };
+    if (res.ok) {
+      if (!data.translations || data.translations.length !== lines.length) {
+        throw new Error("翻訳結果の行数が一致しません");
+      }
+      return data.translations;
+    }
+    const message = data.error ?? "翻訳 API エラー";
+    if (isRetryableGeminiError(message, res.status) && attempt < MAX_CLIENT_RETRIES) {
+      await sleep(backoffMs(attempt));
+      continue;
+    }
+    throw new Error(message);
+  }
+}

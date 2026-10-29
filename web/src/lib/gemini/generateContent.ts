@@ -35,7 +35,7 @@ export function getGeminiApiKey(): string {
   return key;
 }
 
-function formatGeminiError(message: string, status: number): string {
+export function formatGeminiError(message: string, status: number): string {
   if (/API key not valid/i.test(message)) {
     return [
       "Gemini API キーが無効です。",
