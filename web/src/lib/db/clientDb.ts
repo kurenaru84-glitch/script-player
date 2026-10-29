@@ -1,12 +1,17 @@
 import Dexie, { type EntityTable } from "dexie";
 
-export type MediaRecord = {
+/** 字幕・タイトルなど（動画 Blob は含まない → 高速） */
+export type MediaMeta = {
   id: string;
   title: string;
-  videoBlob: Blob;
   primarySrt: string;
   translationSrt: string;
   createdAt: number;
+};
+
+/** @deprecated 互換用。list では Blob を載せない */
+export type MediaRecord = MediaMeta & {
+  videoBlob?: Blob;
 };
 
 export type VocabNote = {
@@ -25,8 +30,17 @@ export type FavoriteRecord = {
   cueIndex: number;
 };
 
+type LegacyMediaRow = MediaMeta & { videoBlob?: Blob };
+
+type VideoBlobRow = {
+  id: string;
+  videoBlob: Blob;
+};
+
 class ScriptPlayerDb extends Dexie {
-  media!: EntityTable<MediaRecord, "id">;
+  media!: EntityTable<LegacyMediaRow, "id">;
+  mediaMeta!: EntityTable<MediaMeta, "id">;
+  videoBlobs!: EntityTable<VideoBlobRow, "id">;
   notes!: EntityTable<VocabNote, "id">;
   favorites!: EntityTable<FavoriteRecord, "id">;
 
@@ -41,6 +55,24 @@ class ScriptPlayerDb extends Dexie {
       notes: "id, mediaId, updatedAt",
       favorites: "id, mediaId, cueIndex",
     });
+    this.version(3)
+      .stores({
+        mediaMeta: "id, createdAt, title",
+        videoBlobs: "id",
+        notes: "id, mediaId, updatedAt",
+        favorites: "id, mediaId, cueIndex",
+        media: null,
+      })
+      .upgrade(async (tx) => {
+        const legacy = await tx.table<LegacyMediaRow>("media").toArray();
+        for (const row of legacy) {
+          const { videoBlob, ...meta } = row;
+          await tx.table("mediaMeta").put(meta);
+          if (videoBlob) {
+            await tx.table("videoBlobs").put({ id: row.id, videoBlob });
+          }
+        }
+      });
   }
 }
 
@@ -62,42 +94,61 @@ export function favoriteId(mediaId: string, cueIndex: number): string {
   return noteId(mediaId, cueIndex);
 }
 
-export async function listMedia(): Promise<MediaRecord[]> {
-  return getDb().media.orderBy("createdAt").reverse().toArray();
+/** My List 用 — 動画 Blob は読まない */
+export async function listMedia(): Promise<MediaMeta[]> {
+  return getDb().mediaMeta.orderBy("createdAt").reverse().toArray();
 }
 
+export async function getMediaMeta(id: string): Promise<MediaMeta | undefined> {
+  return getDb().mediaMeta.get(id);
+}
+
+export async function getVideoBlob(id: string): Promise<Blob | undefined> {
+  const row = await getDb().videoBlobs.get(id);
+  return row?.videoBlob;
+}
+
+/** 互換: メタ + Blob（重いのでプレイヤー以外では使わない） */
 export async function getMedia(id: string): Promise<MediaRecord | undefined> {
-  return getDb().media.get(id);
+  const meta = await getMediaMeta(id);
+  if (!meta) return undefined;
+  const videoBlob = await getVideoBlob(id);
+  return { ...meta, videoBlob };
 }
 
 export async function saveMedia(
-  input: Omit<MediaRecord, "id" | "createdAt"> & { id?: string },
+  input: Omit<MediaMeta, "id" | "createdAt"> & {
+    id?: string;
+    videoBlob: Blob;
+  },
 ): Promise<string> {
   const id = input.id ?? crypto.randomUUID();
-  const existing = await getDb().media.get(id);
-  await getDb().media.put({
+  const existing = await getDb().mediaMeta.get(id);
+  await getDb().mediaMeta.put({
     id,
     title: input.title,
-    videoBlob: input.videoBlob,
     primarySrt: input.primarySrt,
     translationSrt: input.translationSrt,
     createdAt: existing?.createdAt ?? Date.now(),
   });
+  await getDb().videoBlobs.put({ id, videoBlob: input.videoBlob });
   return id;
 }
 
+/** 字幕・タイトルのみ更新（動画 Blob を再書き込みしない） */
 export async function updateMedia(
   id: string,
-  patch: Partial<Pick<MediaRecord, "title" | "primarySrt" | "translationSrt">>,
+  patch: Partial<Pick<MediaMeta, "title" | "primarySrt" | "translationSrt">>,
 ): Promise<void> {
-  const existing = await getMedia(id);
+  const existing = await getMediaMeta(id);
   if (!existing) throw new Error("メディアが見つかりません");
-  await getDb().media.put({ ...existing, ...patch });
+  await getDb().mediaMeta.put({ ...existing, ...patch });
 }
 
 export async function deleteMedia(id: string): Promise<void> {
   const database = getDb();
-  await database.media.delete(id);
+  await database.mediaMeta.delete(id);
+  await database.videoBlobs.delete(id);
   await database.notes.where("mediaId").equals(id).delete();
   await database.favorites.where("mediaId").equals(id).delete();
 }

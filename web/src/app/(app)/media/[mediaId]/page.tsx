@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { GenerateTranslationSrtButton } from "@/components/GenerateTranslationSrtButton";
 import { formatStorageError } from "@/lib/db/errors";
-import { getMedia, updateMedia } from "@/lib/db/clientDb";
+import { getMediaMeta, updateMedia } from "@/lib/db/clientDb";
 
 export default function MediaPropertiesPage() {
   const params = useParams<{ mediaId: string }>();
@@ -18,12 +18,12 @@ export default function MediaPropertiesPage() {
 
   const load = useCallback(async () => {
     if (!mediaId) return;
-    const record = await getMedia(mediaId);
-    if (!record) {
+    const meta = await getMediaMeta(mediaId);
+    if (!meta) {
       setError("メディアが見つかりません");
       return;
     }
-    setTitle(record.title);
+    setTitle(meta.title);
   }, [mediaId]);
 
   useEffect(() => {

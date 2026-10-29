@@ -5,12 +5,16 @@ import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   favoriteCueIndices,
-  getMedia,
+  getMediaMeta,
   getNote,
   noteCueIndices,
   saveNote,
   toggleFavorite,
 } from "@/lib/db/clientDb";
+import {
+  loadVideoObjectUrl,
+  peekVideoObjectUrl,
+} from "@/lib/videoObjectUrlCache";
 import { alignBilingual } from "@/lib/subtitle/alignBilingual";
 import { parseSrt } from "@/lib/subtitle/parseSrt";
 import type { BilingualCue } from "@/lib/subtitle/types";
@@ -44,48 +48,53 @@ export function RepeatPlayer({ mediaId }: Props) {
   const playlistStepRef = useRef(0);
   const playlistQueueRef = useRef<number[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loadingMeta, setLoadingMeta] = useState(true);
+  const [videoLoading, setVideoLoading] = useState(true);
   const [isPlaying, setIsPlaying] = useState(false);
   const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
 
   const reloadMedia = useCallback(async () => {
-    setLoading(true);
     setLoadError(null);
-    let objectUrl: string | null = null;
+    setLoadingMeta(true);
+    setVideoLoading(true);
     try {
-      const record = await getMedia(mediaId);
-      if (!record) {
+      const meta = await getMediaMeta(mediaId);
+      if (!meta) {
         setLoadError("メディアが見つかりません");
+        setVideoLoading(false);
         return;
       }
-      objectUrl = URL.createObjectURL(record.videoBlob);
-      setVideoUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
-        return objectUrl;
-      });
-      setTitle(record.title);
-      const aligned = alignBilingual(
-        parseSrt(record.primarySrt),
-        parseSrt(record.translationSrt),
+      setTitle(meta.title);
+      setCues(
+        alignBilingual(parseSrt(meta.primarySrt), parseSrt(meta.translationSrt)),
       );
-      setCues(aligned);
       setNotedIndices(await noteCueIndices(mediaId));
       setFavoriteIndices(await favoriteCueIndices(mediaId));
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "読み込みに失敗しました");
+      setVideoLoading(false);
     } finally {
-      setLoading(false);
+      setLoadingMeta(false);
+    }
+
+    try {
+      const cached = peekVideoObjectUrl(mediaId);
+      if (cached) {
+        setVideoUrl(cached);
+        setVideoLoading(false);
+        return;
+      }
+      const url = await loadVideoObjectUrl(mediaId);
+      setVideoUrl(url);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "動画の読み込みに失敗しました");
+    } finally {
+      setVideoLoading(false);
     }
   }, [mediaId]);
 
   useEffect(() => {
     void reloadMedia();
-    return () => {
-      setVideoUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
-        return null;
-      });
-    };
   }, [reloadMedia]);
 
   useEffect(() => {
@@ -249,13 +258,13 @@ export function RepeatPlayer({ mediaId }: Props) {
     return null;
   }, [activeIndex, cues, selectedIndex]);
 
-  if (loading) {
+  if (loadingMeta) {
     return (
-      <p className="py-12 text-center text-sm text-zinc-500">読み込み中…</p>
+      <p className="py-12 text-center text-sm text-zinc-500">字幕・一覧を読み込み中…</p>
     );
   }
 
-  if (loadError || !videoUrl) {
+  if (loadError && !videoUrl && cues.length === 0) {
     return (
       <div className="space-y-4 py-8 text-center">
         <p className="text-red-600">{loadError ?? "動画を開けません"}</p>
@@ -401,17 +410,26 @@ export function RepeatPlayer({ mediaId }: Props) {
       >
         <div className="mx-auto max-w-lg px-2 pt-2">
           <div className="relative overflow-hidden rounded-lg bg-black">
-            <video
-              ref={(el) => {
-                videoRef.current = el;
-                setVideoEl(el);
-              }}
-              src={videoUrl}
-              playsInline
-              preload="metadata"
-              className="max-h-28 w-full object-contain"
-              onTimeUpdate={onTimeUpdate}
-            />
+            {videoLoading || !videoUrl ? (
+              <div className="flex max-h-28 min-h-20 items-center justify-center text-xs text-zinc-300">
+                動画データを読み込み中…
+              </div>
+            ) : (
+              <video
+                ref={(el) => {
+                  videoRef.current = el;
+                  setVideoEl(el);
+                }}
+                src={videoUrl}
+                playsInline
+                preload="metadata"
+                className="max-h-28 w-full object-contain"
+                onTimeUpdate={onTimeUpdate}
+              />
+            )}
+            {loadError && (
+              <p className="px-2 pb-1 text-[10px] text-red-300">{loadError}</p>
+            )}
             {overlayCue && (
               <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent px-2 pb-1 pt-6 text-white">
                 <p className="line-clamp-2 text-xs font-medium">{overlayCue.primary}</p>

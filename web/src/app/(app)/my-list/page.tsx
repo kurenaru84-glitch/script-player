@@ -9,11 +9,12 @@ import {
   deleteMedia,
   listMedia,
   updateMedia,
-  type MediaRecord,
+  type MediaMeta,
 } from "@/lib/db/clientDb";
+import { releaseVideoObjectUrl } from "@/lib/videoObjectUrlCache";
 
 export default function MyListPage() {
-  const [items, setItems] = useState<MediaRecord[]>([]);
+  const [items, setItems] = useState<MediaMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
@@ -32,7 +33,7 @@ export default function MyListPage() {
     void refresh();
   }, [refresh]);
 
-  const startRename = (item: MediaRecord) => {
+  const startRename = (item: MediaMeta) => {
     setEditingId(item.id);
     setEditTitle(item.title);
     setError(null);
@@ -131,6 +132,7 @@ export default function MyListPage() {
                       className="text-red-600"
                       onClick={async () => {
                         if (!confirm(`「${item.title}」を削除しますか？`)) return;
+                        releaseVideoObjectUrl(item.id);
                         await deleteMedia(item.id);
                         await refresh();
                       }}

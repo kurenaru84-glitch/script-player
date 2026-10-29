@@ -5,6 +5,7 @@ import { useState } from "react";
 import { MobileAccessHint } from "@/components/MobileAccessHint";
 import { formatStorageError } from "@/lib/db/errors";
 import { saveMedia } from "@/lib/db/clientDb";
+import { warmVideoObjectUrl } from "@/lib/videoObjectUrlCache";
 
 export default function LocalFilesPage() {
   const router = useRouter();
@@ -37,6 +38,7 @@ export default function LocalFilesPage() {
         primarySrt,
         translationSrt,
       });
+      warmVideoObjectUrl(id, videoFile);
       router.push(`/player/${id}`);
     } catch (e) {
       setError(formatStorageError(e));

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { getMedia, updateMedia } from "@/lib/db/clientDb";
+import { getMediaMeta, updateMedia } from "@/lib/db/clientDb";
 import { generateTranslationSrtFromPrimary } from "@/lib/generateTranslationSrt";
 
 type Props = {
@@ -31,12 +31,12 @@ export function GenerateTranslationSrtButton({
     setError(null);
     setProgress("準備中…");
     try {
-      const record = await getMedia(mediaId);
-      if (!record?.primarySrt?.trim()) {
+      const meta = await getMediaMeta(mediaId);
+      if (!meta?.primarySrt?.trim()) {
         throw new Error("メイン字幕がありません");
       }
       const translationSrt = await generateTranslationSrtFromPrimary(
-        record.primarySrt,
+        meta.primarySrt,
         (p) => {
           setProgress(`翻訳中… ${p.done}/${p.total} 行`);
         },
