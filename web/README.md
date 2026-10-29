@@ -17,7 +17,15 @@ MediaDict 風の語学学習 PWA。**動画はサーバーに送らず**各端�
 
 以降はホーム画面のアイコンから起動（PWA・スタンドアロン表示）。
 
-環境変数は **MVP では不要**（Gemini 連携を足す段階で Vercel に API キーを追加）。
+### 環境変数（翻訳 SRT 生成）
+
+Vercel → **Settings → Environment Variables**:
+
+| Name | 用途 |
+|------|------|
+| `GEMINI_API_KEY` | メイン字幕 → 日本語翻訳 SRT の AI 生成 |
+
+追加後 **Redeploy** してください。ローカルでは `web/.env.local` に同じキーを設定。
 
 ## Mac ローカル開発
 
