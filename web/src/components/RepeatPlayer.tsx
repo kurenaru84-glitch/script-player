@@ -22,7 +22,7 @@ import { GenerateTranslationSrtButton } from "@/components/GenerateTranslationSr
 import { useMediaSession } from "@/lib/useMediaSession";
 
 const SPEEDS = [0.8, 1.0, 1.25] as const;
-const LIST_BOTTOM_PAD = "calc(5rem + env(safe-area-inset-bottom, 0px))";
+const PLAYER_HEIGHT = "calc(100dvh - 4.25rem - env(safe-area-inset-bottom, 0px))";
 
 type Props = {
   mediaId: string;
@@ -54,6 +54,9 @@ export function RepeatPlayer({ mediaId }: Props) {
   const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
   const [videoPlayError, setVideoPlayError] = useState<string | null>(null);
   const videoLoadGen = useRef(0);
+  const noteFocusedRef = useRef(false);
+  const lastScrolledIndex = useRef<number | null>(null);
+  const lastActiveIndexRef = useRef<number | null>(null);
 
   const reloadMetaOnly = useCallback(async () => {
     setLoadError(null);
@@ -123,20 +126,36 @@ export function RepeatPlayer({ mediaId }: Props) {
     if (cues[initialCue]) setSelectedIndex(initialCue);
   }, [cues, initialCue]);
 
-  const selectedCue =
-    selectedIndex != null ? cues[selectedIndex] ?? null : null;
+  /** 再生中は喋っている行、停止中は選択行 */
+  const memoLineIndex = useMemo(() => {
+    if (isPlaying && activeIndex != null) return activeIndex;
+    if (selectedIndex != null) return selectedIndex;
+    return activeIndex;
+  }, [activeIndex, isPlaying, selectedIndex]);
+
+  const scrollLineIndex = useMemo(() => {
+    if (isPlaying) {
+      if (activeIndex != null) return activeIndex;
+      return lastActiveIndexRef.current ?? selectedIndex ?? activeIndex;
+    }
+    if (selectedIndex != null) return selectedIndex;
+    return activeIndex;
+  }, [activeIndex, isPlaying, selectedIndex]);
+
+  const memoCue = memoLineIndex != null ? cues[memoLineIndex] ?? null : null;
 
   useEffect(() => {
-    if (selectedIndex == null) {
+    if (memoLineIndex == null) {
       setNoteDraft("");
       return;
     }
-    const cue = cues[selectedIndex];
+    if (noteFocusedRef.current) return;
+    const cue = cues[memoLineIndex];
     if (!cue) return;
-    getNote(mediaId, selectedIndex).then((n) => {
+    getNote(mediaId, memoLineIndex).then((n) => {
       setNoteDraft(n?.body ?? "");
     });
-  }, [mediaId, selectedIndex, cues]);
+  }, [mediaId, memoLineIndex, cues]);
 
   const findActiveIndex = useCallback(
     (timeSec: number): number | null => {
@@ -179,6 +198,7 @@ export function RepeatPlayer({ mediaId }: Props) {
     const video = videoRef.current;
     if (!video) return;
     const active = findActiveIndex(video.currentTime);
+    if (active != null) lastActiveIndexRef.current = active;
     setActiveIndex(active);
 
     if (lineRepeatMode && selectedIndex != null) {
@@ -212,10 +232,17 @@ export function RepeatPlayer({ mediaId }: Props) {
   }, [speed, videoUrl]);
 
   useEffect(() => {
-    if (activeIndex == null || !listRef.current) return;
-    const el = listRef.current.querySelector(`[data-cue-index="${activeIndex}"]`);
-    el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }, [activeIndex]);
+    if (scrollLineIndex == null || !listRef.current) {
+      lastScrolledIndex.current = null;
+      return;
+    }
+    if (lastScrolledIndex.current === scrollLineIndex) return;
+    lastScrolledIndex.current = scrollLineIndex;
+    const el = listRef.current.querySelector(
+      `[data-cue-index="${scrollLineIndex}"]`,
+    );
+    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [scrollLineIndex]);
 
   const togglePlayPause = useCallback(() => {
     const video = videoRef.current;
@@ -269,12 +296,12 @@ export function RepeatPlayer({ mediaId }: Props) {
   };
 
   const saveCurrentNote = async () => {
-    if (selectedIndex == null) return;
-    const cue = cues[selectedIndex];
+    if (memoLineIndex == null) return;
+    const cue = cues[memoLineIndex];
     if (!cue) return;
     await saveNote({
       mediaId,
-      cueIndex: selectedIndex,
+      cueIndex: memoLineIndex,
       primaryLine: cue.primary,
       translationLine: cue.translation,
       body: noteDraft,
@@ -306,9 +333,11 @@ export function RepeatPlayer({ mediaId }: Props) {
   }
 
   return (
-    <div className="relative">
-      <div className="space-y-3" style={{ paddingBottom: LIST_BOTTOM_PAD }}>
-        <div className="flex items-center justify-between gap-2">
+    <div
+      className="relative flex flex-col"
+      style={{ height: PLAYER_HEIGHT, maxHeight: PLAYER_HEIGHT }}
+    >
+      <div className="flex shrink-0 items-center justify-between gap-2 pb-2">
           <h1 className="truncate text-lg font-semibold">{title}</h1>
           <div className="flex shrink-0 gap-2 text-sm">
             <Link href={`/media/${mediaId}`} className="text-sky-600">
@@ -318,9 +347,9 @@ export function RepeatPlayer({ mediaId }: Props) {
               一覧
             </Link>
           </div>
-        </div>
+      </div>
 
-        <div className="sticky top-0 z-30 -mx-1 space-y-2 rounded-xl border border-zinc-200 bg-white/95 p-2 shadow-sm backdrop-blur dark:border-zinc-700 dark:bg-zinc-950/95">
+      <div className="sticky top-0 z-30 -mx-1 shrink-0 space-y-2 rounded-xl border border-zinc-200 bg-white/95 p-2 shadow-sm backdrop-blur dark:border-zinc-700 dark:bg-zinc-950/95">
           <div className="relative overflow-hidden rounded-lg bg-black">
             {videoLoading || !videoUrl ? (
               <div className="flex aspect-video max-h-[min(42vh,280px)] min-h-[140px] flex-col items-center justify-center gap-2 px-2 text-center text-xs text-zinc-300">
@@ -419,15 +448,50 @@ export function RepeatPlayer({ mediaId }: Props) {
               ))}
             </div>
           </div>
-        </div>
 
-        <GenerateTranslationSrtButton
-          mediaId={mediaId}
-          onComplete={() => void reloadMetaOnly()}
-          className="mb-1"
-        />
+        {memoCue && (
+          <div className="rounded-lg border border-emerald-200/80 bg-emerald-50/90 p-2 dark:border-emerald-900/60 dark:bg-emerald-950/40">
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-300">
+                学習メモ #{memoCue.index}
+                {isPlaying && activeIndex === memoLineIndex && (
+                  <span className="ml-1 font-normal normal-case text-emerald-600">
+                    · 再生中のセリフ
+                  </span>
+                )}
+              </p>
+              {notedIndices.has(memoLineIndex!) && (
+                <span className="text-[10px] text-emerald-700">保存済</span>
+              )}
+            </div>
+            <p className="mt-0.5 line-clamp-2 text-xs text-zinc-700 dark:text-zinc-300">
+              {memoCue.primary}
+            </p>
+            <textarea
+              value={noteDraft}
+              onChange={(e) => setNoteDraft(e.target.value)}
+              onFocus={() => {
+                noteFocusedRef.current = true;
+              }}
+              onBlur={() => {
+                noteFocusedRef.current = false;
+              }}
+              rows={2}
+              placeholder="このセリフのメモ…"
+              className="mt-1.5 w-full rounded-lg border border-emerald-200/80 bg-white p-2 text-sm dark:border-emerald-900 dark:bg-zinc-950"
+            />
+            <button
+              type="button"
+              onClick={() => void saveCurrentNote()}
+              className="mt-1.5 rounded-lg bg-emerald-600 px-3 py-1 text-xs font-medium text-white"
+            >
+              メモ保存
+            </button>
+          </div>
+        )}
+      </div>
 
-        <div className="flex flex-wrap gap-2">
+      <div className="mt-2 flex shrink-0 flex-wrap gap-2">
           <ToggleChip
             active={lineRepeatMode}
             onClick={() => setLineRepeatMode((v) => !v)}
@@ -458,31 +522,22 @@ export function RepeatPlayer({ mediaId }: Props) {
               連続停止
             </button>
           )}
-        </div>
+      </div>
 
-        {selectedCue && (
-          <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-900">
-            <p className="text-xs font-medium text-zinc-500">学習メモ</p>
-            <textarea
-              value={noteDraft}
-              onChange={(e) => setNoteDraft(e.target.value)}
-              rows={2}
-              className="mt-2 w-full rounded-lg border border-zinc-300 bg-white p-2 text-sm dark:border-zinc-600 dark:bg-zinc-950"
-            />
-            <button
-              type="button"
-              onClick={() => void saveCurrentNote()}
-              className="mt-2 rounded-lg bg-sky-600 px-3 py-1 text-xs text-white"
-            >
-              メモ保存
-            </button>
-          </div>
-        )}
+      <GenerateTranslationSrtButton
+        mediaId={mediaId}
+        onComplete={() => void reloadMetaOnly()}
+        className="mt-2 shrink-0"
+      />
 
-        <div ref={listRef} className="space-y-2">
+      <div
+        ref={listRef}
+        className="mt-2 min-h-0 flex-1 overflow-y-auto overscroll-contain"
+      >
+        <div className="space-y-2 py-[min(32vh,220px)]">
           {visibleIndices.map((index) => {
             const cue = cues[index]!;
-            const active = activeIndex === index;
+            const speaking = isPlaying && activeIndex === index;
             const selected = selectedIndex === index;
             const hasNote = notedIndices.has(index);
             const favorite = favoriteIndices.has(index);
@@ -490,12 +545,12 @@ export function RepeatPlayer({ mediaId }: Props) {
               <div
                 key={`${cue.index}-${cue.startMs}`}
                 data-cue-index={index}
-                className={`flex gap-1 rounded-lg ${
-                  selected
-                    ? "bg-sky-100 ring-2 ring-sky-500 dark:bg-sky-950"
-                    : active
-                      ? "bg-sky-50 dark:bg-sky-950/40"
-                      : "bg-white dark:bg-zinc-950"
+                className={`flex scroll-my-[min(32vh,220px)] gap-1 rounded-xl border transition-colors duration-200 ${
+                  speaking
+                    ? "scale-[1.02] border-sky-500 bg-sky-100 shadow-md ring-2 ring-sky-400 dark:border-sky-400 dark:bg-sky-900/70"
+                    : selected
+                      ? "border-sky-300 bg-sky-50/80 dark:border-sky-700 dark:bg-sky-950/50"
+                      : "border-transparent bg-white opacity-75 dark:bg-zinc-950 dark:opacity-70"
                 }`}
               >
                 <button
@@ -503,15 +558,38 @@ export function RepeatPlayer({ mediaId }: Props) {
                   onClick={() => playCue(index)}
                   className="min-w-0 flex-1 px-3 py-3 text-left active:scale-[0.99]"
                 >
-                  <div className="flex items-center gap-2 text-xs text-red-600">
+                  <div
+                    className={`flex items-center gap-2 text-xs ${
+                      speaking ? "font-bold text-sky-700 dark:text-sky-200" : "text-red-600"
+                    }`}
+                  >
                     <span className="font-bold">#{cue.index}</span>
+                    {speaking && (
+                      <span className="rounded-full bg-sky-600 px-2 py-0.5 text-[10px] text-white">
+                        再生中
+                      </span>
+                    )}
                     {hasNote && (
                       <span className="rounded bg-emerald-100 px-1.5 text-emerald-800">メモ</span>
                     )}
                   </div>
-                  <p className="mt-1 text-sm font-medium leading-snug">{cue.primary}</p>
+                  <p
+                    className={`mt-1 leading-snug ${
+                      speaking
+                        ? "text-base font-semibold text-zinc-900 dark:text-white"
+                        : "text-sm font-medium text-zinc-700 dark:text-zinc-300"
+                    }`}
+                  >
+                    {cue.primary}
+                  </p>
                   {cue.translation && (
-                    <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+                    <p
+                      className={`mt-1 leading-snug ${
+                        speaking
+                          ? "text-sm font-medium text-sky-900/90 dark:text-sky-100"
+                          : "text-sm text-zinc-600 dark:text-zinc-400"
+                      }`}
+                    >
                       {cue.translation}
                     </p>
                   )}
