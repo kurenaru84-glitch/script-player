@@ -18,15 +18,37 @@ export async function translateLinesViaApi(lines: string[]): Promise<string[]> {
   }
 }
 
+const FETCH_TIMEOUT_MS = 120_000;
+
 async function fetchBatchWithRetries(lines: string[]): Promise<string[]> {
   let attempt = 0;
   while (true) {
     attempt += 1;
-    const res = await fetch("/api/translate-srt-batch", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ lines }),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch("/api/translate-srt-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lines }),
+        signal: controller.signal,
+      });
+    } catch (e) {
+      clearTimeout(timeout);
+      const msg =
+        e instanceof Error && e.name === "AbortError"
+          ? "翻訳 API がタイムアウトしました"
+          : e instanceof Error
+            ? e.message
+            : "ネットワークエラー";
+      if (isRetryableGeminiError(msg) && attempt < MAX_CLIENT_RETRIES) {
+        await sleep(backoffMs(attempt));
+        continue;
+      }
+      throw new Error(msg);
+    }
+    clearTimeout(timeout);
     const data = (await res.json()) as {
       translations?: string[];
       error?: string;

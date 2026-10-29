@@ -2,6 +2,7 @@ export type { TranslationProgress as GenerateProgress } from "@/lib/translation/
 export {
   cancelTranslationJob,
   getTranslationJob,
+  installTranslationVisibilityResume,
   resumeTranslationJobIfNeeded,
   startTranslationJob,
   subscribeTranslationProgress,

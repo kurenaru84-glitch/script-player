@@ -15,6 +15,7 @@ export type TranslationProgress = {
   total: number;
   status: TranslationJobRecord["status"];
   errorMessage?: string;
+  updatedAt?: number;
 };
 
 type Listener = (p: TranslationProgress) => void;
@@ -33,6 +34,7 @@ function emit(mediaId: string, job: TranslationJobRecord) {
     total: job.totalCues,
     status: job.status,
     errorMessage: job.errorMessage,
+    updatedAt: job.updatedAt,
   };
   for (const fn of listeners.get(mediaId) ?? []) fn(p);
 }
@@ -201,20 +203,54 @@ async function runLoop(mediaId: string, primarySrt: string): Promise<void> {
   }
 }
 
-/** ページを開いたとき、中断・エラー状態なら自動再開 */
+const STALE_RUNNING_MS = 90_000;
+
+/** 未完了ジョブを再開（エラー・止まった running・画面復帰時） */
 export async function resumeTranslationJobIfNeeded(mediaId: string): Promise<void> {
   const job = await getTranslationJob(mediaId);
-  if (!job) return;
-  if (job.status === "running" || job.status === "error") {
-    const meta = await getMediaMeta(mediaId);
-    if (!meta?.primarySrt) return;
-    if (job.sourceFingerprint !== fingerprintPrimarySrt(meta.primarySrt)) return;
+  if (!job || job.status === "done" || job.status === "paused") return;
+  if (job.doneCues >= job.totalCues) return;
+
+  const meta = await getMediaMeta(mediaId);
+  if (!meta?.primarySrt) return;
+  if (job.sourceFingerprint !== fingerprintPrimarySrt(meta.primarySrt)) return;
+
+  const staleRunning =
+    job.status === "running" &&
+    !activeLoops.has(mediaId) &&
+    Date.now() - job.updatedAt > STALE_RUNNING_MS;
+
+  if (job.status === "error" || staleRunning) {
     await upsertJob({
       ...job,
       status: "running",
-      errorMessage: undefined,
+      errorMessage: staleRunning ? undefined : job.errorMessage,
       updatedAt: Date.now(),
     });
     void runLoop(mediaId, meta.primarySrt);
+    return;
   }
+
+  if (job.status === "running" && !activeLoops.has(mediaId)) {
+    void runLoop(mediaId, meta.primarySrt);
+  }
+}
+
+let visibilityHookInstalled = false;
+
+/** タブ復帰時に止まった翻訳を再開 */
+export function installTranslationVisibilityResume(): void {
+  if (visibilityHookInstalled || typeof document === "undefined") return;
+  visibilityHookInstalled = true;
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    void openMetaDb().then(async () => {
+      const jobs = await getMetaDb()
+        .translationJobs.filter((j) => j.status === "running" || j.status === "error")
+        .toArray();
+      for (const j of jobs) {
+        if (j.doneCues < j.totalCues) void resumeTranslationJobIfNeeded(j.mediaId);
+      }
+    });
+  });
 }

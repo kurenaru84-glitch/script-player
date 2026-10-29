@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   cancelTranslationJob,
+  installTranslationVisibilityResume,
   resumeTranslationJobIfNeeded,
   startTranslationJob,
   subscribeTranslationProgress,
@@ -26,11 +27,19 @@ export function GenerateTranslationSrtButton({
   const [starting, setStarting] = useState(false);
 
   useEffect(() => {
+    installTranslationVisibilityResume();
     void resumeTranslationJobIfNeeded(mediaId);
-    return subscribeTranslationProgress(mediaId, (p) => {
+    const staleCheck = setInterval(() => {
+      void resumeTranslationJobIfNeeded(mediaId);
+    }, 60_000);
+    const unsub = subscribeTranslationProgress(mediaId, (p) => {
       setProgress(p);
       if (p.status === "done") onComplete?.();
     });
+    return () => {
+      clearInterval(staleCheck);
+      unsub();
+    };
   }, [mediaId, onComplete]);
 
   const run = useCallback(async () => {
@@ -60,6 +69,7 @@ export function GenerateTranslationSrtButton({
   const label = (() => {
     if (starting) return "…";
     if (progress?.status === "done") return "訳✓";
+    if (progress?.errorMessage?.includes("待機")) return `${pct ?? "…"}%`;
     if (busy && pct != null) return `${pct}%`;
     if (progress?.status === "error") return "訳!";
     return "AI訳";
