@@ -52,6 +52,7 @@ export function RepeatPlayer({ mediaId }: Props) {
   const [videoLoading, setVideoLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
+  const [videoPlayError, setVideoPlayError] = useState<string | null>(null);
   const videoLoadGen = useRef(0);
 
   const reloadMetaOnly = useCallback(async () => {
@@ -158,7 +159,9 @@ export function RepeatPlayer({ mediaId }: Props) {
         playlistStepRef.current = 0;
       }
       video.currentTime = cue.startMs / 1000;
-      void video.play();
+      void video.play().catch(() => {
+        setVideoPlayError("再生できません。プロパティから MP4 を選び直してください。");
+      });
     },
     [cues],
   );
@@ -217,8 +220,15 @@ export function RepeatPlayer({ mediaId }: Props) {
   const togglePlayPause = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
-    if (video.paused) void video.play();
-    else video.pause();
+    if (video.paused) {
+      void video.play().catch((e: unknown) => {
+        setVideoPlayError(
+          e instanceof Error ? e.message : "再生できませんでした（タップして再試行）",
+        );
+      });
+    } else {
+      video.pause();
+    }
   }, []);
 
   useMediaSession(videoEl, {
@@ -451,13 +461,21 @@ export function RepeatPlayer({ mediaId }: Props) {
                 }}
                 src={videoUrl}
                 playsInline
-                preload="metadata"
+                preload="auto"
                 className="max-h-28 w-full object-contain"
                 onTimeUpdate={onTimeUpdate}
+                onError={() => {
+                  setVideoPlayError(
+                    "動画形式を読み込めません。MP4 を選び直すか Local Files で再登録してください。",
+                  );
+                }}
+                onLoadedData={() => setVideoPlayError(null)}
               />
             )}
-            {loadError && (
-              <p className="px-2 pb-1 text-[10px] text-red-300">{loadError}</p>
+            {(loadError || videoPlayError) && (
+              <p className="px-2 pb-1 text-[10px] text-red-300">
+                {loadError ?? videoPlayError}
+              </p>
             )}
             {overlayCue && (
               <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent px-2 pb-1 pt-6 text-white">

@@ -138,6 +138,7 @@ export default function MediaPropertiesPage() {
           try {
             releaseVideoObjectUrl(mediaId);
             await storeVideoBlob(mediaId, f);
+            await updateMedia(mediaId, { videoByteSize: f.size });
             warmVideoObjectUrl(mediaId, f);
             setMessage("動画を差し替えました");
             router.push(`/player/${mediaId}`);

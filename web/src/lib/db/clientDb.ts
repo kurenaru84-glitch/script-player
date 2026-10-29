@@ -87,13 +87,16 @@ export async function saveMedia(
     primarySrt: input.primarySrt,
     translationSrt: input.translationSrt,
     createdAt: existing?.createdAt ?? Date.now(),
+    videoByteSize: input.videoBlob.size,
   });
   return id;
 }
 
 export async function updateMedia(
   id: string,
-  patch: Partial<Pick<MediaMeta, "title" | "primarySrt" | "translationSrt">>,
+  patch: Partial<
+    Pick<MediaMeta, "title" | "primarySrt" | "translationSrt" | "videoByteSize">
+  >,
 ): Promise<void> {
   const existing = await getMediaMeta(id);
   if (!existing) throw new Error("メディアが見つかりません");

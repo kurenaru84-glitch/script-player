@@ -4,6 +4,8 @@ export type MediaMeta = {
   primarySrt: string;
   translationSrt: string;
   createdAt: number;
+  /** OPFS 保存後の整合性チェック用（バイト） */
+  videoByteSize?: number;
 };
 
 export type VocabNote = {
