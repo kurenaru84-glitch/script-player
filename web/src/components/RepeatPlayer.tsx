@@ -49,19 +49,18 @@ export function RepeatPlayer({ mediaId }: Props) {
   const playlistQueueRef = useRef<number[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadingMeta, setLoadingMeta] = useState(true);
-  const [videoLoading, setVideoLoading] = useState(true);
+  const [videoLoading, setVideoLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
+  const videoLoadGen = useRef(0);
 
-  const reloadMedia = useCallback(async () => {
+  const reloadMetaOnly = useCallback(async () => {
     setLoadError(null);
     setLoadingMeta(true);
-    setVideoLoading(true);
     try {
       const meta = await getMediaMeta(mediaId);
       if (!meta) {
         setLoadError("メディアが見つかりません");
-        setVideoLoading(false);
         return;
       }
       setTitle(meta.title);
@@ -72,30 +71,51 @@ export function RepeatPlayer({ mediaId }: Props) {
       setFavoriteIndices(await favoriteCueIndices(mediaId));
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "読み込みに失敗しました");
-      setVideoLoading(false);
     } finally {
       setLoadingMeta(false);
     }
+  }, [mediaId]);
 
+  const loadVideoTrack = useCallback(async () => {
+    const gen = ++videoLoadGen.current;
+    setVideoLoading(true);
+    setLoadError(null);
     try {
       const cached = peekVideoObjectUrl(mediaId);
       if (cached) {
-        setVideoUrl(cached);
-        setVideoLoading(false);
+        if (gen === videoLoadGen.current) setVideoUrl(cached);
         return;
       }
-      const url = await loadVideoObjectUrl(mediaId);
-      setVideoUrl(url);
+      const url = await Promise.race([
+        loadVideoObjectUrl(mediaId),
+        new Promise<string>((_, reject) =>
+          setTimeout(
+            () =>
+              reject(
+                new Error(
+                  "動画の読み込みがタイムアウトしました。プロパティから動画を選び直すか、Local Files で再登録してください。",
+                ),
+              ),
+            120_000,
+          ),
+        ),
+      ]);
+      if (gen === videoLoadGen.current) setVideoUrl(url);
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "動画の読み込みに失敗しました");
+      if (gen === videoLoadGen.current) {
+        setLoadError(e instanceof Error ? e.message : "動画の読み込みに失敗しました");
+      }
     } finally {
-      setVideoLoading(false);
+      if (gen === videoLoadGen.current) setVideoLoading(false);
     }
   }, [mediaId]);
 
   useEffect(() => {
-    void reloadMedia();
-  }, [reloadMedia]);
+    void (async () => {
+      await reloadMetaOnly();
+      await loadVideoTrack();
+    })();
+  }, [reloadMetaOnly, loadVideoTrack]);
 
   useEffect(() => {
     if (Number.isNaN(initialCue) || initialCue < 0) return;
@@ -295,7 +315,7 @@ export function RepeatPlayer({ mediaId }: Props) {
 
         <GenerateTranslationSrtButton
           mediaId={mediaId}
-          onComplete={() => void reloadMedia()}
+          onComplete={() => void reloadMetaOnly()}
           className="mb-1"
         />
 
@@ -411,8 +431,17 @@ export function RepeatPlayer({ mediaId }: Props) {
         <div className="mx-auto max-w-lg px-2 pt-2">
           <div className="relative overflow-hidden rounded-lg bg-black">
             {videoLoading || !videoUrl ? (
-              <div className="flex max-h-28 min-h-20 items-center justify-center text-xs text-zinc-300">
-                動画データを読み込み中…
+              <div className="flex max-h-28 min-h-20 flex-col items-center justify-center gap-2 px-2 text-center text-xs text-zinc-300">
+                <span>動画データを読み込み中…（100MB 程度で数十秒かかることがあります）</span>
+                {!videoLoading && (
+                  <button
+                    type="button"
+                    className="rounded bg-white/20 px-2 py-1 text-[10px]"
+                    onClick={() => void loadVideoTrack()}
+                  >
+                    再試行
+                  </button>
+                )}
               </div>
             ) : (
               <video

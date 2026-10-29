@@ -6,6 +6,11 @@ import { useCallback, useEffect, useState } from "react";
 import { GenerateTranslationSrtButton } from "@/components/GenerateTranslationSrtButton";
 import { formatStorageError } from "@/lib/db/errors";
 import { getMediaMeta, updateMedia } from "@/lib/db/clientDb";
+import { storeVideoBlob } from "@/lib/videoStorage/loadVideoBlob";
+import {
+  releaseVideoObjectUrl,
+  warmVideoObjectUrl,
+} from "@/lib/videoObjectUrlCache";
 
 export default function MediaPropertiesPage() {
   const params = useParams<{ mediaId: string }>();
@@ -122,6 +127,28 @@ export default function MediaPropertiesPage() {
         onPick={(f) => void replaceSrt("translation", f)}
       />
 
+      <SrtPick
+        label="動画 MP4 の差し替え（読み込みが遅いとき）"
+        disabled={busy}
+        accept="video/mp4,video/*"
+        onPick={async (f) => {
+          if (!mediaId) return;
+          setBusy(true);
+          setError(null);
+          try {
+            releaseVideoObjectUrl(mediaId);
+            await storeVideoBlob(mediaId, f);
+            warmVideoObjectUrl(mediaId, f);
+            setMessage("動画を差し替えました");
+            router.push(`/player/${mediaId}`);
+          } catch (e) {
+            setError(formatStorageError(e));
+          } finally {
+            setBusy(false);
+          }
+        }}
+      />
+
       {message && <p className="text-sm text-emerald-700">{message}</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
 
@@ -139,17 +166,19 @@ function SrtPick({
   label,
   disabled,
   onPick,
+  accept = ".srt,text/plain,application/x-subrip",
 }: {
   label: string;
   disabled: boolean;
   onPick: (file: File) => void;
+  accept?: string;
 }) {
   return (
     <label className="block space-y-1 text-sm">
       <span className="font-medium">{label}</span>
       <input
         type="file"
-        accept=".srt,text/plain,application/x-subrip"
+        accept={accept}
         disabled={disabled}
         className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-zinc-100 file:px-3 file:py-2 dark:file:bg-zinc-800"
         onChange={(e) => {

@@ -64,6 +64,8 @@ class ScriptPlayerDb extends Dexie {
         media: null,
       })
       .upgrade(async (tx) => {
+        const already = await tx.table("mediaMeta").count();
+        if (already > 0) return;
         const legacy = await tx.table<LegacyMediaRow>("media").toArray();
         for (const row of legacy) {
           const { videoBlob, ...meta } = row;
@@ -131,7 +133,8 @@ export async function saveMedia(
     translationSrt: input.translationSrt,
     createdAt: existing?.createdAt ?? Date.now(),
   });
-  await getDb().videoBlobs.put({ id, videoBlob: input.videoBlob });
+  const { storeVideoBlob } = await import("@/lib/videoStorage/loadVideoBlob");
+  await storeVideoBlob(id, input.videoBlob);
   return id;
 }
 
@@ -147,8 +150,9 @@ export async function updateMedia(
 
 export async function deleteMedia(id: string): Promise<void> {
   const database = getDb();
+  const { removeVideoBlob } = await import("@/lib/videoStorage/loadVideoBlob");
+  await removeVideoBlob(id);
   await database.mediaMeta.delete(id);
-  await database.videoBlobs.delete(id);
   await database.notes.where("mediaId").equals(id).delete();
   await database.favorites.where("mediaId").equals(id).delete();
 }

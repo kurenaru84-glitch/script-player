@@ -1,4 +1,4 @@
-import { getVideoBlob } from "@/lib/db/clientDb";
+import { loadVideoBlob } from "@/lib/videoStorage/loadVideoBlob";
 
 const urlByMediaId = new Map<string, string>();
 const loadingByMediaId = new Map<string, Promise<string>>();
@@ -15,10 +15,7 @@ export async function loadVideoObjectUrl(mediaId: string): Promise<string> {
   if (inflight) return inflight;
 
   const task = (async () => {
-    const blob = await getVideoBlob(mediaId);
-    if (!blob || blob.size === 0) {
-      throw new Error("動画データが見つかりません。Local Files から入れ直してください。");
-    }
+    const blob = await loadVideoBlob(mediaId);
     const url = URL.createObjectURL(blob);
     urlByMediaId.set(mediaId, url);
     return url;

@@ -5,6 +5,7 @@ import { useState } from "react";
 import { MobileAccessHint } from "@/components/MobileAccessHint";
 import { formatStorageError } from "@/lib/db/errors";
 import { saveMedia } from "@/lib/db/clientDb";
+import { requestPersistentStorage } from "@/lib/videoStorage/opfs";
 import { warmVideoObjectUrl } from "@/lib/videoObjectUrlCache";
 
 export default function LocalFilesPage() {
@@ -28,6 +29,7 @@ export default function LocalFilesPage() {
     }
     setBusy(true);
     try {
+      await requestPersistentStorage();
       const [primarySrt, translationSrt] = await Promise.all([
         primaryFile.text(),
         translationFile ? translationFile.text() : Promise.resolve(""),
