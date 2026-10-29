@@ -1,59 +1,51 @@
-import { getVideoBlob, getDb } from "@/lib/db/clientDb";
+import { readLegacyVideoBlob } from "@/lib/db/legacyVideoBlob";
 import {
-  preferOpfsForVideoStorage,
+  deleteVideoBlobFromVideoDb,
+  getVideoBlobFromVideoDb,
+  putVideoBlobToVideoDb,
+} from "@/lib/db/videoDb";
+import {
+  isOpfsAvailable,
   readVideoFromOpfs,
   writeVideoToOpfs,
 } from "@/lib/videoStorage/opfs";
 
-let migratingIds = new Set<string>();
-
-/** IndexedDB を正。OPFS は Android/Chrome 等でのみ試す（IDB は削除しない） */
+/** MediaDict 同様、一覧では呼ばない。OPFS（Pixel Chrome 等）→ 旧 IDB → 予備 IDB */
 export async function loadVideoBlob(mediaId: string): Promise<Blob> {
-  const fromIdb = await getVideoBlob(mediaId);
-  if (fromIdb && fromIdb.size > 0) {
-    if (preferOpfsForVideoStorage() && !migratingIds.has(mediaId)) {
-      migratingIds.add(mediaId);
-      void writeVideoToOpfs(mediaId, fromIdb).finally(() =>
-        migratingIds.delete(mediaId),
-      );
-    }
-    return fromIdb;
+  if (isOpfsAvailable()) {
+    const fromOpfs = await readVideoFromOpfs(mediaId);
+    if (fromOpfs && fromOpfs.size > 0) return fromOpfs;
   }
 
-  if (preferOpfsForVideoStorage()) {
-    const fromOpfs = await readVideoFromOpfs(mediaId);
-    if (fromOpfs && fromOpfs.size > 0) {
-      await getDb().videoBlobs.put({ id: mediaId, videoBlob: fromOpfs });
-      return fromOpfs;
+  const fromLegacy = await readLegacyVideoBlob(mediaId);
+  if (fromLegacy) {
+    if (isOpfsAvailable()) {
+      void writeVideoToOpfs(mediaId, fromLegacy);
     }
-  } else {
-    const fromOpfs = await readVideoFromOpfs(mediaId);
-    if (fromOpfs && fromOpfs.size > 0) {
-      try {
-        await getDb().videoBlobs.put({ id: mediaId, videoBlob: fromOpfs });
-      } catch {
-        /* クォータ不足時も OPFS から再生は試す */
-      }
-      return fromOpfs;
+    return fromLegacy;
+  }
+
+  const fromVideoDb = await getVideoBlobFromVideoDb(mediaId);
+  if (fromVideoDb && fromVideoDb.size > 0) {
+    if (isOpfsAvailable()) {
+      void writeVideoToOpfs(mediaId, fromVideoDb);
     }
+    return fromVideoDb;
   }
 
   throw new Error("動画データが見つかりません。Local Files から入れ直してください。");
 }
 
 export async function storeVideoBlob(mediaId: string, blob: Blob): Promise<void> {
-  await getDb().videoBlobs.put({ id: mediaId, videoBlob: blob });
-  if (preferOpfsForVideoStorage()) {
-    try {
-      await writeVideoToOpfs(mediaId, blob);
-    } catch {
-      /* IDB に保存済みなので続行 */
-    }
+  if (isOpfsAvailable()) {
+    await writeVideoToOpfs(mediaId, blob);
+    return;
   }
+  await putVideoBlobToVideoDb(mediaId, blob);
 }
 
 export async function removeVideoBlob(mediaId: string): Promise<void> {
   const { deleteVideoFromOpfs } = await import("@/lib/videoStorage/opfs");
   await deleteVideoFromOpfs(mediaId);
-  await getDb().videoBlobs.delete(mediaId);
+  await deleteVideoBlobFromVideoDb(mediaId);
 }

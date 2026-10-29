@@ -8,16 +8,6 @@ export function isOpfsAvailable(): boolean {
   );
 }
 
-/** iOS / Safari では OPFS の大容量書き込みが不安定なため IndexedDB を正とする */
-export function preferOpfsForVideoStorage(): boolean {
-  if (!isOpfsAvailable()) return false;
-  if (typeof navigator === "undefined") return false;
-  const ua = navigator.userAgent;
-  if (/iPhone|iPad|iPod/i.test(ua)) return false;
-  if (/Safari/i.test(ua) && !/Chrome|Chromium|CriOS|Edg/i.test(ua)) return false;
-  return true;
-}
-
 async function videosDir() {
   const root = await navigator.storage.getDirectory();
   return root.getDirectoryHandle(VIDEOS_DIR, { create: true });
