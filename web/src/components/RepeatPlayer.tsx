@@ -22,7 +22,7 @@ import { GenerateTranslationSrtButton } from "@/components/GenerateTranslationSr
 import { useMediaSession } from "@/lib/useMediaSession";
 
 const SPEEDS = [0.8, 1.0, 1.25] as const;
-const DOCK_BOTTOM = "calc(4.25rem + env(safe-area-inset-bottom, 0px))";
+const LIST_BOTTOM_PAD = "calc(5rem + env(safe-area-inset-bottom, 0px))";
 
 type Props = {
   mediaId: string;
@@ -307,10 +307,7 @@ export function RepeatPlayer({ mediaId }: Props) {
 
   return (
     <div className="relative">
-      <div
-        className="space-y-3"
-        style={{ paddingBottom: "calc(13.5rem + 4.25rem + env(safe-area-inset-bottom, 0px))" }}
-      >
+      <div className="space-y-3" style={{ paddingBottom: LIST_BOTTOM_PAD }}>
         <div className="flex items-center justify-between gap-2">
           <h1 className="truncate text-lg font-semibold">{title}</h1>
           <div className="flex shrink-0 gap-2 text-sm">
@@ -320,6 +317,107 @@ export function RepeatPlayer({ mediaId }: Props) {
             <Link href="/my-list" className="text-sky-600">
               一覧
             </Link>
+          </div>
+        </div>
+
+        <div className="sticky top-0 z-30 -mx-1 space-y-2 rounded-xl border border-zinc-200 bg-white/95 p-2 shadow-sm backdrop-blur dark:border-zinc-700 dark:bg-zinc-950/95">
+          <div className="relative overflow-hidden rounded-lg bg-black">
+            {videoLoading || !videoUrl ? (
+              <div className="flex aspect-video max-h-[min(42vh,280px)] min-h-[140px] flex-col items-center justify-center gap-2 px-2 text-center text-xs text-zinc-300">
+                <span>動画データを読み込み中…</span>
+                {!videoLoading && (
+                  <button
+                    type="button"
+                    className="rounded bg-white/20 px-2 py-1 text-[10px]"
+                    onClick={() => void loadVideoTrack()}
+                  >
+                    再試行
+                  </button>
+                )}
+              </div>
+            ) : (
+              <video
+                ref={(el) => {
+                  videoRef.current = el;
+                  setVideoEl(el);
+                }}
+                src={videoUrl}
+                playsInline
+                preload="auto"
+                className="aspect-video max-h-[min(42vh,280px)] w-full object-contain"
+                onTimeUpdate={onTimeUpdate}
+                onError={() => {
+                  setVideoPlayError(
+                    "動画形式を読み込めません。MP4 を選び直すか Local Files で再登録してください。",
+                  );
+                }}
+                onLoadedData={() => setVideoPlayError(null)}
+              />
+            )}
+            {(loadError || videoPlayError) && (
+              <p className="px-2 pb-1 text-[10px] text-red-300">
+                {loadError ?? videoPlayError}
+              </p>
+            )}
+            {overlayCue && (
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent px-2 pb-1 pt-6 text-white">
+                <p className="line-clamp-2 text-xs font-medium">{overlayCue.primary}</p>
+                {overlayCue.translation && (
+                  <p className="line-clamp-1 text-[10px] text-zinc-300">
+                    {overlayCue.translation}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => goRelative(-1)}
+              className="rounded-lg border border-zinc-300 px-2.5 py-2 text-xs dark:border-zinc-600"
+            >
+              前
+            </button>
+            <button
+              type="button"
+              onClick={togglePlayPause}
+              className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white"
+            >
+              {isPlaying ? "一時停止" : "再生"}
+            </button>
+            <button
+              type="button"
+              onClick={() => goRelative(1)}
+              className="rounded-lg border border-zinc-300 px-2.5 py-2 text-xs dark:border-zinc-600"
+            >
+              次
+            </button>
+            <button
+              type="button"
+              onClick={() => setLineRepeatMode((v) => !v)}
+              className={`rounded-lg px-2.5 py-2 text-xs ${
+                lineRepeatMode
+                  ? "bg-sky-100 text-sky-800 dark:bg-sky-900"
+                  : "border border-zinc-300 dark:border-zinc-600"
+              }`}
+            >
+              {lineRepeatMode ? "🔁 リピート" : "通常"}
+            </button>
+            <div className="ml-auto flex gap-1">
+              {SPEEDS.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setSpeed(s)}
+                  className={`rounded px-2 py-1 text-xs ${
+                    speed === s ? "bg-sky-600 text-white" : "border border-zinc-300 dark:border-zinc-600"
+                  }`}
+                >
+                  x{s}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -431,112 +529,6 @@ export function RepeatPlayer({ mediaId }: Props) {
               </div>
             );
           })}
-        </div>
-      </div>
-
-      <div
-        className="fixed inset-x-0 z-40 border-t border-zinc-200 bg-white/95 shadow-[0_-4px_24px_rgba(0,0,0,0.08)] backdrop-blur dark:border-zinc-700 dark:bg-zinc-950/95"
-        style={{ bottom: DOCK_BOTTOM }}
-      >
-        <div className="mx-auto max-w-lg px-2 pt-2">
-          <div className="relative overflow-hidden rounded-lg bg-black">
-            {videoLoading || !videoUrl ? (
-              <div className="flex max-h-28 min-h-20 flex-col items-center justify-center gap-2 px-2 text-center text-xs text-zinc-300">
-                <span>動画データを読み込み中…（100MB 程度で数十秒かかることがあります）</span>
-                {!videoLoading && (
-                  <button
-                    type="button"
-                    className="rounded bg-white/20 px-2 py-1 text-[10px]"
-                    onClick={() => void loadVideoTrack()}
-                  >
-                    再試行
-                  </button>
-                )}
-              </div>
-            ) : (
-              <video
-                ref={(el) => {
-                  videoRef.current = el;
-                  setVideoEl(el);
-                }}
-                src={videoUrl}
-                playsInline
-                preload="auto"
-                className="max-h-28 w-full object-contain"
-                onTimeUpdate={onTimeUpdate}
-                onError={() => {
-                  setVideoPlayError(
-                    "動画形式を読み込めません。MP4 を選び直すか Local Files で再登録してください。",
-                  );
-                }}
-                onLoadedData={() => setVideoPlayError(null)}
-              />
-            )}
-            {(loadError || videoPlayError) && (
-              <p className="px-2 pb-1 text-[10px] text-red-300">
-                {loadError ?? videoPlayError}
-              </p>
-            )}
-            {overlayCue && (
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent px-2 pb-1 pt-6 text-white">
-                <p className="line-clamp-2 text-xs font-medium">{overlayCue.primary}</p>
-                {overlayCue.translation && (
-                  <p className="line-clamp-1 text-[10px] text-zinc-300">
-                    {overlayCue.translation}
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-
-          <div className="mt-2 flex flex-wrap items-center gap-2 pb-2">
-            <button
-              type="button"
-              onClick={() => goRelative(-1)}
-              className="rounded-lg border border-zinc-300 px-2.5 py-2 text-xs dark:border-zinc-600"
-            >
-              前
-            </button>
-            <button
-              type="button"
-              onClick={togglePlayPause}
-              className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white"
-            >
-              {isPlaying ? "一時停止" : "再生"}
-            </button>
-            <button
-              type="button"
-              onClick={() => goRelative(1)}
-              className="rounded-lg border border-zinc-300 px-2.5 py-2 text-xs dark:border-zinc-600"
-            >
-              次
-            </button>
-            <button
-              type="button"
-              onClick={() => setLineRepeatMode((v) => !v)}
-              className={`rounded-lg px-2.5 py-2 text-xs ${
-                lineRepeatMode
-                  ? "bg-sky-100 text-sky-800 dark:bg-sky-900"
-                  : "border border-zinc-300 dark:border-zinc-600"
-              }`}
-            >
-              {lineRepeatMode ? "🔁 リピート" : "通常"}
-            </button>
-            <div className="ml-auto flex gap-1">
-              {SPEEDS.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setSpeed(s)}
-                  className={`rounded px-2 py-1 text-xs ${
-                    speed === s ? "bg-sky-600 text-white" : "border border-zinc-300 dark:border-zinc-600"
-                  }`}
-                >
-                  x{s}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
     </div>

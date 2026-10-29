@@ -1,4 +1,4 @@
-const MODEL = process.env.GEMINI_MODEL?.trim() || "gemini-3.5-flash-lite";
+const MODEL = process.env.GEMINI_MODEL?.trim() || "gemini-3.5-flash";
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
 type GeminiResponse = {
@@ -8,22 +8,58 @@ type GeminiResponse = {
   error?: { message?: string };
 };
 
+function sanitizeApiKey(raw: string | undefined): string {
+  if (!raw) return "";
+  let key = raw.trim();
+  if (
+    (key.startsWith('"') && key.endsWith('"')) ||
+    (key.startsWith("'") && key.endsWith("'"))
+  ) {
+    key = key.slice(1, -1).trim();
+  }
+  return key;
+}
+
 export function getGeminiApiKey(): string {
-  const key = process.env.GEMINI_API_KEY?.trim();
+  const key = sanitizeApiKey(process.env.GEMINI_API_KEY);
   if (!key) {
     throw new Error(
-      "GEMINI_API_KEY が未設定です。Vercel の Environment Variables に追加してください。",
+      "GEMINI_API_KEY が未設定です。Vercel → Settings → Environment Variables に Key=GEMINI_API_KEY、Value=AI Studio のキー を入れ、Redeploy してください。",
+    );
+  }
+  if (key === "GEMINI_API_KEY" || key.includes("your_api_key")) {
+    throw new Error(
+      "GEMINI_API_KEY の Value にキー本体（AIza…）を入れてください。名前の GEMINI_API_KEY を Value に入れないでください。",
     );
   }
   return key;
 }
 
+function formatGeminiError(message: string, status: number): string {
+  if (/API key not valid/i.test(message)) {
+    return [
+      "Gemini API キーが無効です。",
+      "① AI Studio (aistudio.google.com/apikey) で作成したキーか確認",
+      "② Vercel の Value に余計な空白・引用符がないか",
+      "③ キー制限で「HTTP リファラー」のみにしているとサーバーから使えません（制限なし推奨）",
+      "④ 追加後に Production を Redeploy したか",
+    ].join(" ");
+  }
+  if (status === 404 || /not found/i.test(message)) {
+    return `${message} （GEMINI_MODEL=${MODEL} が無効な可能性。gemini-3.5-flash 等に変更）`;
+  }
+  return message;
+}
+
 export async function geminiGenerateText(prompt: string): Promise<string> {
   const apiKey = getGeminiApiKey();
-  const url = `${API_BASE}/${MODEL}:generateContent?key=${apiKey}`;
+  const url = `${API_BASE}/${MODEL}:generateContent`;
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": apiKey,
+    },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
@@ -34,7 +70,8 @@ export async function geminiGenerateText(prompt: string): Promise<string> {
   });
   const data = (await res.json()) as GeminiResponse;
   if (!res.ok) {
-    throw new Error(data.error?.message ?? `Gemini API error (${res.status})`);
+    const msg = data.error?.message ?? `Gemini API error (${res.status})`;
+    throw new Error(formatGeminiError(msg, res.status));
   }
   const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
   if (!text.trim()) throw new Error("空の応答でした");

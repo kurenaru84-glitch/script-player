@@ -65,7 +65,8 @@ export function GenerateTranslationSrtButton({
       {progress && <p className="mt-2 text-xs text-zinc-500">{progress}</p>}
       {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
       <p className="mt-1 text-[10px] leading-relaxed text-zinc-400">
-        Vercel に GEMINI_API_KEY が必要です。タイムコードはメイン字幕と同じです。
+        自動では始まりません。上のボタンを押すと翻訳 SRT を作成します（Vercel の
+        GEMINI_API_KEY・Redeploy 必須）。
       </p>
     </div>
   );
