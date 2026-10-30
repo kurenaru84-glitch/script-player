@@ -39,5 +39,7 @@ export type TranslationJobRecord = {
   errorMessage?: string;
   /** 同じ位置で連続失敗（リトライ上限用） */
   consecutiveFailures?: number;
+  /** doneCues が最後に進んだ時刻（再試行だけでは更新しない） */
+  lastProgressAt?: number;
   updatedAt: number;
 };
