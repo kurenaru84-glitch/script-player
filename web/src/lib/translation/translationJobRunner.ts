@@ -5,6 +5,7 @@ import { fingerprintPrimarySrt } from "@/lib/translation/fingerprintPrimarySrt";
 import {
   isModelUnavailableError,
   isRetryableGeminiError,
+  isTranslationFormatError,
   backoffMs,
   sleep,
 } from "@/lib/gemini/retryableError";
@@ -16,6 +17,7 @@ const BATCH_SIZE = 10;
 const PAUSE_BETWEEN_BATCH_MS = 2200;
 const MAX_BATCH_FAILURES = 18;
 const STALE_JOB_MS = 120_000;
+const AUTO_COOLDOWN_MS = 75_000;
 
 export type TranslationProgress = {
   done: number;
@@ -247,43 +249,23 @@ async function runLoop(mediaId: string, primarySrt: string): Promise<void> {
       } catch (e) {
         const message = e instanceof Error ? e.message : "翻訳に失敗しました";
         const failures = (job.consecutiveFailures ?? 0) + 1;
+        const formatHint = isTranslationFormatError(message) ? "（JSON形式）" : "";
+        const waitMs =
+          failures >= MAX_BATCH_FAILURES
+            ? AUTO_COOLDOWN_MS
+            : backoffMs(Math.min(failures, 8), 3500);
 
-        if (failures >= MAX_BATCH_FAILURES) {
-          const failed: TranslationJobRecord = {
-            ...job,
-            status: "error",
-            consecutiveFailures: failures,
-            errorMessage: `ここで止まりました（${job.doneCues}/${job.totalCues}）。AI訳をタップで続行: ${message.slice(0, 80)}`,
-            updatedAt: Date.now(),
-          };
-          await upsertJob(failed);
-          emit(mediaId, failed);
-          return;
-        }
-
-        if (isRetryableGeminiError(message) || isModelUnavailableError(message)) {
-          const waiting: TranslationJobRecord = {
-            ...job,
-            consecutiveFailures: failures,
-            errorMessage: `待機・再試行 (${failures}/${MAX_BATCH_FAILURES}): ${message.slice(0, 60)}`,
-            updatedAt: Date.now(),
-          };
-          await upsertJob(waiting);
-          emit(mediaId, waiting);
-          await sleep(backoffMs(Math.min(failures, 8), 3500));
-          continue;
-        }
-
-        const failed: TranslationJobRecord = {
+        const waiting: TranslationJobRecord = {
           ...job,
-          status: "error",
-          consecutiveFailures: failures,
-          errorMessage: message,
+          status: "running",
+          consecutiveFailures: failures >= MAX_BATCH_FAILURES ? 0 : failures,
+          errorMessage: `自動再試行${formatHint}… ${Math.round(waitMs / 1000)}秒後（${job.doneCues}/${job.totalCues}）`,
           updatedAt: Date.now(),
         };
-        await upsertJob(failed);
-        emit(mediaId, failed);
-        return;
+        await upsertJob(waiting);
+        emit(mediaId, waiting);
+        await sleep(waitMs);
+        continue;
       }
     }
   } finally {
@@ -315,8 +297,8 @@ export async function resumeTranslationJobIfNeeded(mediaId: string): Promise<voi
     await upsertJob({
       ...job,
       status: "running",
-      errorMessage: wasStale ? undefined : job.errorMessage,
-      consecutiveFailures: wasStale ? 0 : job.consecutiveFailures,
+      errorMessage: undefined,
+      consecutiveFailures: 0,
       updatedAt: Date.now(),
     });
     void runLoop(mediaId, meta.primarySrt);
@@ -348,7 +330,7 @@ export function installTranslationGlobalResume(): void {
 
   setInterval(() => {
     void resumeAllIncompleteTranslationJobs();
-  }, 45_000);
+  }, 20_000);
 }
 
 /** @deprecated use installTranslationGlobalResume */

@@ -10,6 +10,13 @@ export function isModelUnavailableError(message: string, status?: number): boole
   );
 }
 
+/** API 応答の形式崩れ（JSON 以外） */
+export function isTranslationFormatError(message: string): boolean {
+  return /not valid JSON|Unexpected token|JSON 配列|翻訳 JSON|行数が一致|空の応答|JSON ではありません|parse/i.test(
+    message,
+  );
+}
+
 export function isRetryableGeminiError(message: string, status?: number): boolean {
   if (isModelUnavailableError(message, status)) return false;
   if (
@@ -21,6 +28,7 @@ export function isRetryableGeminiError(message: string, status?: number): boolea
   ) {
     return true;
   }
+  if (isTranslationFormatError(message)) return true;
   return /high demand|resource exhausted|overloaded|quota|rate limit|try again|temporarily unavailable|deadline exceeded|タイムアウト|network|failed to fetch|503|429|504|load failed/i.test(
     message,
   );

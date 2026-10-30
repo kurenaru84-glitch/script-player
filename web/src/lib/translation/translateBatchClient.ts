@@ -2,6 +2,7 @@ import {
   backoffMs,
   isModelUnavailableError,
   isRetryableGeminiError,
+  isTranslationFormatError,
   sleep,
 } from "@/lib/gemini/retryableError";
 
@@ -16,7 +17,8 @@ export async function translateLinesViaApi(lines: string[]): Promise<string[]> {
     const shouldSplit =
       lines.length > 1 &&
       (isRetryableGeminiError(msg) ||
-        /行数が一致|JSON|空の応答|長すぎ|too long|MAX/i.test(msg));
+        isTranslationFormatError(msg) ||
+        /長すぎ|too long|MAX/i.test(msg));
     if (shouldSplit) {
       const mid = Math.ceil(lines.length / 2);
       const left = await translateLinesViaApi(lines.slice(0, mid));
@@ -58,10 +60,26 @@ async function fetchBatchWithRetries(lines: string[]): Promise<string[]> {
       throw new Error(msg);
     }
     clearTimeout(timeout);
-    const data = (await res.json()) as {
-      translations?: string[];
-      error?: string;
-    };
+    const rawBody = await res.text();
+    let data: { translations?: string[]; error?: string };
+    try {
+      data = JSON.parse(rawBody) as { translations?: string[]; error?: string };
+    } catch {
+      const snippet = rawBody.replace(/\s+/g, " ").trim().slice(0, 120);
+      const message =
+        snippet.length === 0
+          ? "翻訳 API が空の応答を返しました"
+          : `翻訳 API の応答が JSON ではありません（${snippet}）`;
+      if (
+        (isRetryableGeminiError(message, res.status) ||
+          isTranslationFormatError(message)) &&
+        attempt < MAX_CLIENT_RETRIES
+      ) {
+        await sleep(backoffMs(attempt));
+        continue;
+      }
+      throw new Error(message);
+    }
     if (res.ok) {
       if (!data.translations || data.translations.length !== lines.length) {
         throw new Error("翻訳結果の行数が一致しません");

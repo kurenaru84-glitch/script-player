@@ -27,7 +27,9 @@ export function TranslationProgressBanner() {
       {active.map((s) => {
         const pct =
           s.total > 0 ? Math.min(100, Math.round((s.done / s.total) * 100)) : 0;
-        const waiting = Boolean(s.errorMessage?.match(/待機|混雑|再試行/i));
+        const waiting = Boolean(
+          s.errorMessage?.match(/待機|混雑|再試行|自動再試行/i),
+        );
         const isError = s.status === "error";
         return (
           <div

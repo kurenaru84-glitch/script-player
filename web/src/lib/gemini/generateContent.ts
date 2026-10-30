@@ -72,7 +72,18 @@ export async function geminiGenerateText(prompt: string): Promise<string> {
       },
     }),
   });
-  const data = (await res.json()) as GeminiResponse;
+  const rawBody = await res.text();
+  let data: GeminiResponse;
+  try {
+    data = JSON.parse(rawBody) as GeminiResponse;
+  } catch {
+    const snippet = rawBody.replace(/\s+/g, " ").trim().slice(0, 120);
+    throw new Error(
+      snippet.length === 0
+        ? "Gemini API が空の応答を返しました"
+        : `Gemini API の応答が JSON ではありません（${snippet}）`,
+    );
+  }
   if (!res.ok) {
     const msg = data.error?.message ?? `Gemini API error (${res.status})`;
     throw new Error(formatGeminiError(msg, res.status));
