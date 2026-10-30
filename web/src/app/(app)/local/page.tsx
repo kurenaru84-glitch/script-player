@@ -7,6 +7,11 @@ import { formatStorageError } from "@/lib/db/errors";
 import { saveMedia } from "@/lib/db/clientDb";
 import { refineSubtitlePair } from "@/lib/subtitle/refineSubtitles";
 import { requestPersistentStorage } from "@/lib/videoStorage/opfs";
+import {
+  UNIFIED_FILE_INPUT_ACCEPT,
+  videoPickError,
+  srtPickError,
+} from "@/lib/filePick";
 import { warmVideoObjectUrl } from "@/lib/videoObjectUrlCache";
 
 export default function LocalFilesPage() {
@@ -17,6 +22,7 @@ export default function LocalFilesPage() {
   const [translationFile, setTranslationFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pickError, setPickError] = useState<string | null>(null);
 
   const onSubmit = async () => {
     setError(null);
@@ -56,8 +62,8 @@ export default function LocalFilesPage() {
       <header>
         <h1 className="text-xl font-semibold">Local Files</h1>
         <p className="mt-1 text-sm text-zinc-500">
-          動画と SRT をこの端末だけに保存します（File API + IndexedDB）。iPhone
-          は「ファイル」アプリに入れた MP4 / SRT から選べます。
+          動画・字幕とも「ファイル」アプリ（Android なら Files by Google
+          など）から選べます。種類は選んだあと拡張子で判定します。
         </p>
       </header>
 
@@ -75,23 +81,27 @@ export default function LocalFilesPage() {
 
       <FilePick
         label="動画 (MP4)"
-        accept="video/mp4,video/*"
+        kind="video"
         file={videoFile}
         onPick={setVideoFile}
+        onPickError={setPickError}
       />
       <FilePick
         label="メイン字幕 SRT（学習言語）"
-        accept=".srt,text/plain,application/x-subrip"
+        kind="srt"
         file={primaryFile}
         onPick={setPrimaryFile}
+        onPickError={setPickError}
       />
       <FilePick
         label="サブ字幕 SRT（翻訳・任意）"
-        accept=".srt,text/plain,application/x-subrip"
+        kind="srt"
         file={translationFile}
         onPick={setTranslationFile}
+        onPickError={setPickError}
       />
 
+      {pickError && <p className="text-sm text-amber-700">{pickError}</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <button
@@ -108,23 +118,39 @@ export default function LocalFilesPage() {
 
 function FilePick({
   label,
-  accept,
+  kind,
   file,
   onPick,
+  onPickError,
 }: {
   label: string;
-  accept: string;
+  kind: "video" | "srt";
   file: File | null;
   onPick: (f: File | null) => void;
+  onPickError: (msg: string | null) => void;
 }) {
   return (
     <label className="block space-y-1 text-sm">
       <span className="font-medium">{label}</span>
       <input
         type="file"
-        accept={accept}
+        accept={UNIFIED_FILE_INPUT_ACCEPT}
         className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-zinc-100 file:px-3 file:py-2 dark:file:bg-zinc-800"
-        onChange={(e) => onPick(e.target.files?.[0] ?? null)}
+        onChange={(e) => {
+          const f = e.target.files?.[0] ?? null;
+          e.target.value = "";
+          if (!f) {
+            onPick(null);
+            return;
+          }
+          const err = kind === "video" ? videoPickError(f) : srtPickError(f);
+          if (err) {
+            onPickError(err);
+            return;
+          }
+          onPickError(null);
+          onPick(f);
+        }}
       />
       {file && (
         <p className="text-xs text-zinc-500">

@@ -5,6 +5,11 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { GenerateTranslationSrtButton } from "@/components/GenerateTranslationSrtButton";
 import { SubtitleRefinePanel } from "@/components/SubtitleRefinePanel";
+import {
+  UNIFIED_FILE_INPUT_ACCEPT,
+  srtPickError,
+  videoPickError,
+} from "@/lib/filePick";
 import { refineSubtitlePair } from "@/lib/subtitle/refineSubtitles";
 import { formatStorageError } from "@/lib/db/errors";
 import { getMediaMeta, updateMedia } from "@/lib/db/clientDb";
@@ -22,6 +27,7 @@ export default function MediaPropertiesPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [pickError, setPickError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!mediaId) return;
@@ -143,21 +149,26 @@ export default function MediaPropertiesPage() {
         動画ファイルは変更できません。SRT を選ぶと保存後プレイヤーを開きます。
       </p>
 
-      <SrtPick
+      <MediaFilePick
         label="メイン字幕 SRT"
+        kind="srt"
         disabled={busy}
+        onPickError={setPickError}
         onPick={(f) => void replaceSrt("primary", f)}
       />
-      <SrtPick
+      <MediaFilePick
         label="翻訳字幕 SRT"
+        kind="srt"
         disabled={busy}
+        onPickError={setPickError}
         onPick={(f) => void replaceSrt("translation", f)}
       />
 
-      <SrtPick
+      <MediaFilePick
         label="動画 MP4 の差し替え（読み込みが遅いとき）"
+        kind="video"
         disabled={busy}
-        accept="video/mp4,video/*"
+        onPickError={setPickError}
         onPick={async (f) => {
           if (!mediaId) return;
           setBusy(true);
@@ -177,6 +188,7 @@ export default function MediaPropertiesPage() {
         }}
       />
 
+      {pickError && <p className="text-sm text-amber-700">{pickError}</p>}
       {message && <p className="text-sm text-emerald-700">{message}</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
 
@@ -190,29 +202,38 @@ export default function MediaPropertiesPage() {
   );
 }
 
-function SrtPick({
+function MediaFilePick({
   label,
+  kind,
   disabled,
   onPick,
-  accept = ".srt,text/plain,application/x-subrip",
+  onPickError,
 }: {
   label: string;
+  kind: "video" | "srt";
   disabled: boolean;
   onPick: (file: File) => void;
-  accept?: string;
+  onPickError: (msg: string | null) => void;
 }) {
   return (
     <label className="block space-y-1 text-sm">
       <span className="font-medium">{label}</span>
       <input
         type="file"
-        accept={accept}
+        accept={UNIFIED_FILE_INPUT_ACCEPT}
         disabled={disabled}
         className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-zinc-100 file:px-3 file:py-2 dark:file:bg-zinc-800"
         onChange={(e) => {
           const f = e.target.files?.[0];
-          if (f) onPick(f);
           e.target.value = "";
+          if (!f) return;
+          const err = kind === "video" ? videoPickError(f) : srtPickError(f);
+          if (err) {
+            onPickError(err);
+            return;
+          }
+          onPickError(null);
+          onPick(f);
         }}
       />
     </label>
