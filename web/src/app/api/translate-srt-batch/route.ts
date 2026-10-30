@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { translateSubtitleLines } from "@/lib/gemini/translateSubtitleLines";
 
-const MAX_LINES = 40;
+export const maxDuration = 60;
+
+const MAX_LINES = 25;
 const MAX_CHARS = 12_000;
 
 export async function POST(request: Request) {

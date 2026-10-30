@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   cancelTranslationJob,
-  installTranslationVisibilityResume,
+  installTranslationGlobalResume,
   resumeTranslationJobIfNeeded,
   startTranslationJob,
   subscribeTranslationProgress,
@@ -27,7 +27,7 @@ export function GenerateTranslationSrtButton({
   const [starting, setStarting] = useState(false);
 
   useEffect(() => {
-    installTranslationVisibilityResume();
+    installTranslationGlobalResume();
     void resumeTranslationJobIfNeeded(mediaId);
     const staleCheck = setInterval(() => {
       void resumeTranslationJobIfNeeded(mediaId);

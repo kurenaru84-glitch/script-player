@@ -37,5 +37,7 @@ export type TranslationJobRecord = {
   lines: string[];
   status: "running" | "paused" | "done" | "error";
   errorMessage?: string;
+  /** 同じ位置で連続失敗（リトライ上限用） */
+  consecutiveFailures?: number;
   updatedAt: number;
 };

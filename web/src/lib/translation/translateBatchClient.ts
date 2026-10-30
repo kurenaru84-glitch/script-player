@@ -8,7 +8,11 @@ export async function translateLinesViaApi(lines: string[]): Promise<string[]> {
     return await fetchBatchWithRetries(lines);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    if (isRetryableGeminiError(msg) && lines.length > 1) {
+    const shouldSplit =
+      lines.length > 1 &&
+      (isRetryableGeminiError(msg) ||
+        /行数が一致|JSON|空の応答|長すぎ|too long|MAX/i.test(msg));
+    if (shouldSplit) {
       const mid = Math.ceil(lines.length / 2);
       const left = await translateLinesViaApi(lines.slice(0, mid));
       const right = await translateLinesViaApi(lines.slice(mid));

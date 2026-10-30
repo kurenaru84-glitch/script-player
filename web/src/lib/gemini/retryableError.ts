@@ -1,6 +1,14 @@
 export function isRetryableGeminiError(message: string, status?: number): boolean {
-  if (status === 429 || status === 503 || status === 502 || status === 500) return true;
-  return /high demand|resource exhausted|overloaded|quota|rate limit|try again|temporarily unavailable|deadline exceeded|503|429/i.test(
+  if (
+    status === 429 ||
+    status === 503 ||
+    status === 502 ||
+    status === 500 ||
+    status === 504
+  ) {
+    return true;
+  }
+  return /high demand|resource exhausted|overloaded|quota|rate limit|try again|temporarily unavailable|deadline exceeded|タイムアウト|network|failed to fetch|503|429|504|load failed/i.test(
     message,
   );
 }

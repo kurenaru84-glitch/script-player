@@ -7,8 +7,10 @@ import { translateLinesViaApi } from "@/lib/translation/translateBatchClient";
 import { parseSrt } from "@/lib/subtitle/parseSrt";
 import { serializeSrt } from "@/lib/subtitle/serializeSrt";
 
-const BATCH_SIZE = 12;
-const PAUSE_BETWEEN_BATCH_MS = 1800;
+const BATCH_SIZE = 10;
+const PAUSE_BETWEEN_BATCH_MS = 2200;
+const MAX_BATCH_FAILURES = 18;
+const STALE_JOB_MS = 120_000;
 
 export type TranslationProgress = {
   done: number;
@@ -70,6 +72,11 @@ async function upsertJob(job: TranslationJobRecord): Promise<void> {
   await getMetaDb().translationJobs.put(job);
 }
 
+function killActiveLoop(mediaId: string): void {
+  runTokens.set(mediaId, (runTokens.get(mediaId) ?? 0) + 1);
+  activeLoops.delete(mediaId);
+}
+
 export async function getTranslationJob(
   mediaId: string,
 ): Promise<TranslationJobRecord | undefined> {
@@ -78,7 +85,7 @@ export async function getTranslationJob(
 }
 
 export async function cancelTranslationJob(mediaId: string): Promise<void> {
-  runTokens.set(mediaId, (runTokens.get(mediaId) ?? 0) + 1);
+  killActiveLoop(mediaId);
   await openMetaDb();
   const existing = await getMetaDb().translationJobs.get(jobId(mediaId));
   if (existing && existing.status === "running") {
@@ -116,16 +123,24 @@ export async function startTranslationJob(
       doneCues: 0,
       lines: cues.map(() => ""),
       status: "running",
+      consecutiveFailures: 0,
       updatedAt: Date.now(),
     };
     await upsertJob(job);
   } else if (job.status === "done") {
     return;
   } else {
-    job = { ...job, status: "running", errorMessage: undefined, updatedAt: Date.now() };
+    job = {
+      ...job,
+      status: "running",
+      errorMessage: undefined,
+      consecutiveFailures: 0,
+      updatedAt: Date.now(),
+    };
     await upsertJob(job);
   }
 
+  killActiveLoop(mediaId);
   emit(mediaId, job);
   void runLoop(mediaId, meta.primarySrt);
 }
@@ -137,75 +152,106 @@ async function runLoop(mediaId: string, primarySrt: string): Promise<void> {
   runTokens.set(mediaId, token);
 
   try {
-  while (true) {
-    if (runTokens.get(mediaId) !== token) return;
+    while (true) {
+      if (runTokens.get(mediaId) !== token) return;
 
-    const job = await getMetaDb().translationJobs.get(jobId(mediaId));
-    if (!job || job.status !== "running") return;
-    if (job.doneCues >= job.totalCues) {
-      const doneJob: TranslationJobRecord = {
-        ...job,
-        status: "done",
-        updatedAt: Date.now(),
-      };
-      await upsertJob(doneJob);
-      emit(mediaId, doneJob);
-      return;
-    }
-
-    const start = job.doneCues;
-    const batchEnd = Math.min(start + BATCH_SIZE, job.totalCues);
-    const cues = parseSrt(primarySrt);
-    const batchTexts = cues.slice(start, batchEnd).map((c) => c.text);
-
-    try {
-      const translated = await translateLinesViaApi(batchTexts);
-      const lines = [...job.lines];
-      for (let i = 0; i < translated.length; i++) {
-        lines[start + i] = translated[i] ?? "";
-      }
-      const next: TranslationJobRecord = {
-        ...job,
-        lines,
-        doneCues: batchEnd,
-        updatedAt: Date.now(),
-      };
-      await upsertJob(next);
-      await savePartialTranslation(mediaId, primarySrt, lines);
-      emit(mediaId, next);
-
-      if (batchEnd < job.totalCues) {
-        await sleep(PAUSE_BETWEEN_BATCH_MS);
-      }
-    } catch (e) {
-      const message = e instanceof Error ? e.message : "翻訳に失敗しました";
-      if (isRetryableGeminiError(message)) {
-        emit(mediaId, {
+      const job = await getMetaDb().translationJobs.get(jobId(mediaId));
+      if (!job || job.status !== "running") return;
+      if (job.doneCues >= job.totalCues) {
+        const doneJob: TranslationJobRecord = {
           ...job,
-          errorMessage: `混雑のため待機中… (${message.slice(0, 40)})`,
-        });
-        await sleep(backoffMs(3, 4000));
-        continue;
+          status: "done",
+          errorMessage: undefined,
+          consecutiveFailures: 0,
+          updatedAt: Date.now(),
+        };
+        await upsertJob(doneJob);
+        emit(mediaId, doneJob);
+        return;
       }
-      const failed: TranslationJobRecord = {
-        ...job,
-        status: "error",
-        errorMessage: message,
-        updatedAt: Date.now(),
-      };
-      await upsertJob(failed);
-      emit(mediaId, failed);
-      return;
+
+      const start = job.doneCues;
+      const batchEnd = Math.min(start + BATCH_SIZE, job.totalCues);
+      const cues = parseSrt(primarySrt);
+      const batchTexts = cues.slice(start, batchEnd).map((c) => c.text);
+
+      try {
+        const translated = await translateLinesViaApi(batchTexts);
+        const lines = [...job.lines];
+        for (let i = 0; i < translated.length; i++) {
+          lines[start + i] = translated[i] ?? "";
+        }
+        const next: TranslationJobRecord = {
+          ...job,
+          lines,
+          doneCues: batchEnd,
+          consecutiveFailures: 0,
+          errorMessage: undefined,
+          updatedAt: Date.now(),
+        };
+        await upsertJob(next);
+        await savePartialTranslation(mediaId, primarySrt, lines);
+        emit(mediaId, next);
+
+        if (batchEnd < job.totalCues) {
+          await sleep(PAUSE_BETWEEN_BATCH_MS);
+        }
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "翻訳に失敗しました";
+        const failures = (job.consecutiveFailures ?? 0) + 1;
+
+        if (failures >= MAX_BATCH_FAILURES) {
+          const failed: TranslationJobRecord = {
+            ...job,
+            status: "error",
+            consecutiveFailures: failures,
+            errorMessage: `ここで止まりました（${job.doneCues}/${job.totalCues}）。AI訳をタップで続行: ${message.slice(0, 80)}`,
+            updatedAt: Date.now(),
+          };
+          await upsertJob(failed);
+          emit(mediaId, failed);
+          return;
+        }
+
+        if (isRetryableGeminiError(message)) {
+          const waiting: TranslationJobRecord = {
+            ...job,
+            consecutiveFailures: failures,
+            errorMessage: `待機・再試行 (${failures}/${MAX_BATCH_FAILURES}): ${message.slice(0, 60)}`,
+            updatedAt: Date.now(),
+          };
+          await upsertJob(waiting);
+          emit(mediaId, waiting);
+          await sleep(backoffMs(Math.min(failures, 8), 3500));
+          continue;
+        }
+
+        const failed: TranslationJobRecord = {
+          ...job,
+          status: "error",
+          consecutiveFailures: failures,
+          errorMessage: message,
+          updatedAt: Date.now(),
+        };
+        await upsertJob(failed);
+        emit(mediaId, failed);
+        return;
+      }
     }
-  }
   } finally {
     activeLoops.delete(mediaId);
   }
 }
 
-const STALE_RUNNING_MS = 90_000;
+/** 長時間 progress なし → ループを強制終了して再開 */
+function unstickIfStale(mediaId: string, job: TranslationJobRecord): boolean {
+  if (job.status !== "running") return false;
+  if (Date.now() - job.updatedAt < STALE_JOB_MS) return false;
+  killActiveLoop(mediaId);
+  return true;
+}
 
-/** 未完了ジョブを再開（エラー・止まった running・画面復帰時） */
+/** 未完了ジョブを再開 */
 export async function resumeTranslationJobIfNeeded(mediaId: string): Promise<void> {
   const job = await getTranslationJob(mediaId);
   if (!job || job.status === "done" || job.status === "paused") return;
@@ -215,42 +261,49 @@ export async function resumeTranslationJobIfNeeded(mediaId: string): Promise<voi
   if (!meta?.primarySrt) return;
   if (job.sourceFingerprint !== fingerprintPrimarySrt(meta.primarySrt)) return;
 
-  const staleRunning =
-    job.status === "running" &&
-    !activeLoops.has(mediaId) &&
-    Date.now() - job.updatedAt > STALE_RUNNING_MS;
+  const wasStale = unstickIfStale(mediaId, job);
 
-  if (job.status === "error" || staleRunning) {
+  if (job.status === "error" || wasStale || !activeLoops.has(mediaId)) {
     await upsertJob({
       ...job,
       status: "running",
-      errorMessage: staleRunning ? undefined : job.errorMessage,
+      errorMessage: wasStale ? undefined : job.errorMessage,
+      consecutiveFailures: wasStale ? 0 : job.consecutiveFailures,
       updatedAt: Date.now(),
     });
-    void runLoop(mediaId, meta.primarySrt);
-    return;
-  }
-
-  if (job.status === "running" && !activeLoops.has(mediaId)) {
     void runLoop(mediaId, meta.primarySrt);
   }
 }
 
-let visibilityHookInstalled = false;
+let globalHooksInstalled = false;
 
-/** タブ復帰時に止まった翻訳を再開 */
-export function installTranslationVisibilityResume(): void {
-  if (visibilityHookInstalled || typeof document === "undefined") return;
-  visibilityHookInstalled = true;
+export async function resumeAllIncompleteTranslationJobs(): Promise<void> {
+  await openMetaDb();
+  const jobs = await getMetaDb()
+    .translationJobs.filter((j) => j.status === "running" || j.status === "error")
+    .toArray();
+  for (const j of jobs) {
+    if (j.doneCues < j.totalCues) await resumeTranslationJobIfNeeded(j.mediaId);
+  }
+}
+
+/** アプリ全体: タブ復帰・定期で止まった翻訳を再開 */
+export function installTranslationGlobalResume(): void {
+  if (globalHooksInstalled || typeof document === "undefined") return;
+  globalHooksInstalled = true;
+
+  void resumeAllIncompleteTranslationJobs();
+
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState !== "visible") return;
-    void openMetaDb().then(async () => {
-      const jobs = await getMetaDb()
-        .translationJobs.filter((j) => j.status === "running" || j.status === "error")
-        .toArray();
-      for (const j of jobs) {
-        if (j.doneCues < j.totalCues) void resumeTranslationJobIfNeeded(j.mediaId);
-      }
-    });
+    if (document.visibilityState === "visible") void resumeAllIncompleteTranslationJobs();
   });
+
+  setInterval(() => {
+    void resumeAllIncompleteTranslationJobs();
+  }, 45_000);
+}
+
+/** @deprecated use installTranslationGlobalResume */
+export function installTranslationVisibilityResume(): void {
+  installTranslationGlobalResume();
 }
