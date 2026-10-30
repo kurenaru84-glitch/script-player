@@ -12,10 +12,19 @@ import {
 type Props = {
   cue: BilingualCue;
   cueKey: number;
+  variant?: "compact" | "fullscreen";
   onSolved?: () => void;
+  onSkip?: () => void;
 };
 
-export function DictationPanel({ cue, cueKey, onSolved }: Props) {
+export function DictationPanel({
+  cue,
+  cueKey,
+  variant = "compact",
+  onSolved,
+  onSkip,
+}: Props) {
+  const fullscreen = variant === "fullscreen";
   const targetWords = useMemo(
     () => primaryToDictationWords(cue.primary),
     [cue.primary],
@@ -39,9 +48,20 @@ export function DictationPanel({ cue, cueKey, onSolved }: Props) {
 
   if (targetWords.length === 0) {
     return (
-      <p className="text-center text-xs text-zinc-500">
-        この行はディクテ対象外（歌詞・効果音のみ）
-      </p>
+      <div className="space-y-2 text-center">
+        <p className="text-xs text-zinc-500">
+          この行はディクテ対象外（歌詞・効果音のみ）
+        </p>
+        {onSkip && (
+          <button
+            type="button"
+            onClick={onSkip}
+            className="text-sm text-sky-600 underline"
+          >
+            次のセリフへ
+          </button>
+        )}
+      </div>
     );
   }
 
@@ -71,44 +91,68 @@ export function DictationPanel({ cue, cueKey, onSolved }: Props) {
     }
   };
 
-  return (
-    <div className="space-y-2 rounded-lg border border-sky-200 bg-sky-50/80 p-2 dark:border-sky-900 dark:bg-sky-950/40">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-800 dark:text-sky-200">
-          Dictation · #{cue.index}
-        </p>
-        <span className="text-[10px] text-zinc-500">単語を順にタップ</span>
-      </div>
+  const chipClass = fullscreen
+    ? "rounded-full bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md active:scale-95"
+    : "rounded-full bg-sky-600 px-2.5 py-1 text-xs font-medium text-white shadow-sm active:scale-95";
 
-      <div className="min-h-[2.25rem] rounded-lg border border-dashed border-sky-300 bg-white/90 px-2 py-1.5 dark:border-sky-800 dark:bg-zinc-950">
+  return (
+    <div
+      className={
+        fullscreen
+          ? "flex flex-col gap-4"
+          : "space-y-2 rounded-lg border border-sky-200 bg-sky-50/80 p-2 dark:border-sky-900 dark:bg-sky-950/40"
+      }
+    >
+      {!fullscreen && (
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-800 dark:text-sky-200">
+            Dictation · #{cue.index}
+          </p>
+          <span className="text-[10px] text-zinc-500">単語を順にタップ</span>
+        </div>
+      )}
+
+      <div
+        className={
+          fullscreen
+            ? "min-h-[3rem] rounded-xl border border-dashed border-sky-300 bg-white px-3 py-2 dark:border-sky-800 dark:bg-zinc-900"
+            : "min-h-[2.25rem] rounded-lg border border-dashed border-sky-300 bg-white/90 px-2 py-1.5 dark:border-sky-800 dark:bg-zinc-950"
+        }
+      >
         {picked.length === 0 ? (
-          <span className="text-xs text-zinc-400">ここに並べる</span>
+          <span className="text-sm text-zinc-400">ここに並べる</span>
         ) : (
-          <p className="text-sm font-medium leading-relaxed text-zinc-900 dark:text-zinc-100">
+          <p className="text-base font-medium leading-relaxed text-zinc-900 dark:text-zinc-100">
             {picked.map((t) => t.word).join(" ")}
           </p>
         )}
       </div>
 
-      <div className="flex min-h-[2.5rem] flex-wrap justify-center gap-1.5">
+      <div
+        className={
+          fullscreen
+            ? "flex min-h-[8rem] flex-wrap content-center justify-center gap-2 py-2"
+            : "flex min-h-[2.5rem] flex-wrap justify-center gap-1.5"
+        }
+      >
         {pool.map((t) => (
           <button
             key={`${cueKey}-${t.id}-${t.word}`}
             type="button"
             onClick={() => pick(t)}
-            className="rounded-full bg-sky-600 px-2.5 py-1 text-xs font-medium text-white shadow-sm active:scale-95"
+            className={chipClass}
           >
             {t.word}
           </button>
         ))}
       </div>
 
-      <div className="flex flex-wrap gap-2">
+      <div className={`flex flex-wrap gap-2 ${fullscreen ? "justify-center" : ""}`}>
         <button
           type="button"
           onClick={check}
           disabled={picked.length === 0}
-          className="rounded-lg bg-sky-700 px-3 py-1 text-xs font-medium text-white disabled:opacity-40"
+          className="rounded-lg bg-sky-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
         >
           答え合わせ
         </button>
@@ -116,29 +160,38 @@ export function DictationPanel({ cue, cueKey, onSolved }: Props) {
           type="button"
           onClick={unpickLast}
           disabled={picked.length === 0}
-          className="rounded-lg border border-zinc-300 px-2 py-1 text-xs dark:border-zinc-600"
+          className="rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-600"
         >
           1つ戻す
         </button>
         <button
           type="button"
           onClick={() => setRevealed(true)}
-          className="rounded-lg border border-zinc-300 px-2 py-1 text-xs dark:border-zinc-600"
+          className="rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-600"
         >
           答えを見る
         </button>
+        {onSkip && (
+          <button
+            type="button"
+            onClick={onSkip}
+            className="rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-600"
+          >
+            スキップ
+          </button>
+        )}
       </div>
 
       {result === "ok" && (
-        <p className="text-center text-sm font-semibold text-emerald-600">正解！</p>
+        <p className="text-center text-base font-semibold text-emerald-600">正解！</p>
       )}
       {result === "ng" && (
-        <p className="text-center text-xs text-amber-700 dark:text-amber-300">
+        <p className="text-center text-sm text-amber-700 dark:text-amber-300">
           違います。もう一度並べ替えてみてください。
         </p>
       )}
       {(revealed || result === "ok") && (
-        <div className="rounded-lg bg-white/90 p-2 text-sm dark:bg-zinc-900">
+        <div className="rounded-xl bg-white p-3 text-sm shadow-sm dark:bg-zinc-900">
           <p className="font-medium text-zinc-800 dark:text-zinc-100">{cue.primary}</p>
           {cue.translation && (
             <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">{cue.translation}</p>

@@ -18,8 +18,8 @@ import {
 import { alignBilingual } from "@/lib/subtitle/alignBilingual";
 import { parseSrt } from "@/lib/subtitle/parseSrt";
 import type { BilingualCue } from "@/lib/subtitle/types";
-import { DictationPanel } from "@/components/DictationPanel";
 import { GenerateTranslationSrtButton } from "@/components/GenerateTranslationSrtButton";
+import { setLastMediaId } from "@/lib/lastMediaId";
 import { useMediaSession } from "@/lib/useMediaSession";
 
 const SPEEDS = [0.8, 1.0, 1.25] as const;
@@ -40,7 +40,6 @@ export function RepeatPlayer({ mediaId }: Props) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [lineRepeatMode, setLineRepeatMode] = useState(false);
-  const [dictationMode, setDictationMode] = useState(false);
   const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(1.0);
   const [noteDraft, setNoteDraft] = useState("");
   const [notedIndices, setNotedIndices] = useState<Set<number>>(new Set());
@@ -120,6 +119,10 @@ export function RepeatPlayer({ mediaId }: Props) {
     } finally {
       if (gen === videoLoadGen.current) setVideoLoading(false);
     }
+  }, [mediaId]);
+
+  useEffect(() => {
+    setLastMediaId(mediaId);
   }, [mediaId]);
 
   useEffect(() => {
@@ -321,21 +324,14 @@ export function RepeatPlayer({ mediaId }: Props) {
     }
   };
 
-  const dictationCueIndex = useMemo(() => {
-    if (selectedIndex != null) return selectedIndex;
-    if (isPlaying && activeIndex != null) return activeIndex;
-    return selectedIndex ?? activeIndex;
-  }, [activeIndex, isPlaying, selectedIndex]);
-
-  const dictationCue =
-    dictationCueIndex != null ? cues[dictationCueIndex] ?? null : null;
-
   const overlayCue = useMemo(() => {
-    if (dictationMode) return null;
     if (selectedIndex != null) return cues[selectedIndex] ?? null;
     if (activeIndex != null) return cues[activeIndex] ?? null;
     return null;
-  }, [activeIndex, cues, dictationMode, selectedIndex]);
+  }, [activeIndex, cues, selectedIndex]);
+
+  const dictationCueParam =
+    selectedIndex ?? activeIndex ?? (initialCue >= 0 ? initialCue : 0);
 
   if (loadingMeta) {
     return (
@@ -367,6 +363,12 @@ export function RepeatPlayer({ mediaId }: Props) {
               variant="compact"
               onComplete={() => void reloadMetaOnly({ showLoading: false })}
             />
+            <Link
+              href={`/dictation/${mediaId}?cue=${dictationCueParam}`}
+              className="text-sky-600"
+            >
+              ディクテ
+            </Link>
             <Link href={`/media/${mediaId}`} className="text-sky-600">
               設定
             </Link>
@@ -460,17 +462,6 @@ export function RepeatPlayer({ mediaId }: Props) {
             >
               {lineRepeatMode ? "🔁 リピート" : "通常"}
             </button>
-            <button
-              type="button"
-              onClick={() => setDictationMode((v) => !v)}
-              className={`rounded-lg px-2.5 py-2 text-xs ${
-                dictationMode
-                  ? "bg-sky-600 text-white"
-                  : "border border-zinc-300 dark:border-zinc-600"
-              }`}
-            >
-              ディクテ
-            </button>
             <div className="ml-auto flex gap-1">
               {SPEEDS.map((s) => (
                 <button
@@ -487,25 +478,9 @@ export function RepeatPlayer({ mediaId }: Props) {
             </div>
           </div>
 
-          {dictationMode && dictationCue && dictationCueIndex != null && (
-            <DictationPanel
-              cue={dictationCue}
-              cueKey={dictationCueIndex}
-              onSolved={() => {
-                if (lineRepeatMode) return;
-                goRelative(1);
-              }}
-            />
-          )}
-
       </div>
 
       <div className="mt-2 flex shrink-0 flex-wrap gap-2">
-          <ToggleChip
-            active={dictationMode}
-            onClick={() => setDictationMode((v) => !v)}
-            label={dictationMode ? "ディクテ ON" : "ディクテ OFF"}
-          />
           <ToggleChip
             active={lineRepeatMode}
             onClick={() => setLineRepeatMode((v) => !v)}
@@ -593,7 +568,7 @@ export function RepeatPlayer({ mediaId }: Props) {
                         : "text-sm font-medium text-zinc-700 dark:text-zinc-300"
                     }`}
                   >
-                    {dictationMode ? "············" : cue.primary}
+                    {cue.primary}
                   </p>
                   {cue.translation && (
                     <p
