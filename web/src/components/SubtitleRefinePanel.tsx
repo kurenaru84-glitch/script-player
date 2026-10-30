@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { getMediaMeta, updateMedia } from "@/lib/db/clientDb";
 import { parseSrt } from "@/lib/subtitle/parseSrt";
@@ -172,9 +173,16 @@ export function SubtitleRefinePanel({ mediaId, onSaved }: Props) {
         </button>
       </div>
 
+      <Link
+        href={`/media/${mediaId}/subtitles`}
+        className="inline-flex rounded-lg border border-violet-400 bg-violet-50 px-3 py-2 text-xs font-medium text-violet-900 dark:bg-violet-950/40 dark:text-violet-100"
+      >
+        Notta 風エディタを開く（Enter で区切り · Backspace で結合）
+      </Link>
+
       <hr className="border-zinc-200 dark:border-zinc-700" />
 
-      <p className="text-xs font-medium text-zinc-600 dark:text-zinc-300">手動修正</p>
+      <p className="text-xs font-medium text-zinc-600 dark:text-zinc-300">クイック修正</p>
       <div className="flex flex-wrap items-end gap-2">
         <label className="text-xs">
           行 #

@@ -25,7 +25,10 @@ import {
 } from "@/components/PlayerPlaybackSettings";
 import { VideoSubtitleOverlay } from "@/components/VideoSubtitleOverlay";
 import { setLastMediaId } from "@/lib/lastMediaId";
-import { useBackgroundPlayback } from "@/lib/useBackgroundPlayback";
+import {
+  enterVideoPictureInPicture,
+  useBackgroundPlayback,
+} from "@/lib/useBackgroundPlayback";
 import { useMediaSession } from "@/lib/useMediaSession";
 
 const PLAYER_HEIGHT = "calc(100dvh - 4.25rem - env(safe-area-inset-bottom, 0px))";
@@ -66,6 +69,7 @@ export function RepeatPlayer({ mediaId }: Props) {
   const [videoPlayError, setVideoPlayError] = useState<string | null>(null);
   const [memoOpenIndex, setMemoOpenIndex] = useState<number | null>(null);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [pipSupported, setPipSupported] = useState(false);
   const videoLoadGen = useRef(0);
   const noteFocusedRef = useRef(false);
   const lastScrolledIndex = useRef<number | null>(null);
@@ -133,6 +137,12 @@ export function RepeatPlayer({ mediaId }: Props) {
   useEffect(() => {
     setLastMediaId(mediaId);
   }, [mediaId]);
+
+  useEffect(() => {
+    setPipSupported(
+      typeof document !== "undefined" && Boolean(document.pictureInPictureEnabled),
+    );
+  }, []);
 
   useEffect(() => {
     void (async () => {
@@ -417,6 +427,9 @@ export function RepeatPlayer({ mediaId }: Props) {
             >
               ディクテ
             </Link>
+            <Link href={`/media/${mediaId}/subtitles`} className="text-sky-600">
+              字幕編集
+            </Link>
             <Link href={`/media/${mediaId}`} className="text-sky-600">
               設定
             </Link>
@@ -463,13 +476,30 @@ export function RepeatPlayer({ mediaId }: Props) {
               />
             )}
             {videoUrl && !videoLoading && (
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                {!isPlaying && (
-                  <span className="rounded-full bg-black/50 px-3 py-1 text-xs font-medium text-white">
-                    タップで再生
-                  </span>
+              <>
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                  {!isPlaying && (
+                    <span className="rounded-full bg-black/50 px-3 py-1 text-xs font-medium text-white">
+                      タップで再生
+                    </span>
+                  )}
+                </div>
+                {pipSupported && (
+                  <button
+                    type="button"
+                    title="小窓再生（画面オフでも続けやすい）"
+                    className="absolute bottom-1 right-1 rounded-md bg-black/65 px-2 py-1 text-[10px] font-medium text-white"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void enterVideoPictureInPicture(videoRef.current);
+                      markUserPlay();
+                      void videoRef.current?.play();
+                    }}
+                  >
+                    小窓
+                  </button>
                 )}
-              </div>
+              </>
             )}
             {(loadError || videoPlayError) && (
               <p className="px-2 pb-1 text-[10px] text-red-300">
@@ -480,6 +510,12 @@ export function RepeatPlayer({ mediaId }: Props) {
           </div>
 
       </div>
+
+      {pipSupported && (
+        <p className="text-[10px] text-zinc-500">
+          画面オフで止まる場合は「小窓」を押してからロックしてください（Android 向け）。
+        </p>
+      )}
 
       <div className="mt-2 flex shrink-0 flex-wrap gap-2">
           <ToggleChip
