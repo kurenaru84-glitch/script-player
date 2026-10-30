@@ -30,8 +30,11 @@ import {
   useBackgroundPlayback,
 } from "@/lib/useBackgroundPlayback";
 import { useMediaSession } from "@/lib/useMediaSession";
+import { shouldHandleLineRepeatEnd } from "@/lib/subtitle/lineRepeatAtTime";
 
 const PLAYER_HEIGHT = "calc(100dvh - 4.25rem - env(safe-area-inset-bottom, 0px))";
+/** 字幕終端付近（ms）。timeupdate は疎いので余裕を取る */
+const CUE_END_TOLERANCE_MS = 120;
 
 type Props = {
   mediaId: string;
@@ -195,6 +198,7 @@ export function RepeatPlayer({ mediaId }: Props) {
       setSelectedIndex(index);
       lineRepeatPassRef.current = 0;
       lineRepeatIndexRef.current = index;
+      lineEndHandledRef.current = false;
       if (!opts?.keepPlaylist) {
         setFavoritePlaylistActive(false);
         playlistQueueRef.current = [];
@@ -221,36 +225,67 @@ export function RepeatPlayer({ mediaId }: Props) {
   const onTimeUpdate = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
+    const tMs = video.currentTime * 1000;
     const active = findActiveIndex(video.currentTime);
-    if (active != null) lastActiveIndexRef.current = active;
+    if (active != null) {
+      lastActiveIndexRef.current = active;
+      if (
+        playback.lineRepeatCount > 0 &&
+        !favoritePlaylistActive &&
+        lineRepeatIndexRef.current == null
+      ) {
+        lineRepeatIndexRef.current = active;
+        lineRepeatPassRef.current = 0;
+      }
+    }
     setActiveIndex(active);
 
     const repeatN = playback.lineRepeatCount;
-    if (repeatN > 0 && active != null && !favoritePlaylistActive) {
-      const cue = cues[active];
-      const atEnd = cue && video.currentTime >= cue.endMs / 1000 - 0.05;
-      if (atEnd && cue) {
+    if (repeatN > 0 && !favoritePlaylistActive) {
+      const repeatIdx =
+        lineRepeatIndexRef.current ??
+        active ??
+        lastActiveIndexRef.current;
+      const endHit =
+        repeatIdx != null
+          ? shouldHandleLineRepeatEnd({
+              cues,
+              repeatIdx,
+              timeMs: tMs,
+              activeIdx: active,
+              endToleranceMs: CUE_END_TOLERANCE_MS,
+            })
+          : null;
+
+      if (endHit) {
+        const { cue, repeatIdx: idx } = endHit;
         if (!lineEndHandledRef.current) {
           lineEndHandledRef.current = true;
-          if (lineRepeatIndexRef.current !== active) {
-            lineRepeatIndexRef.current = active;
-            lineRepeatPassRef.current = 0;
-          }
+          lineRepeatIndexRef.current = idx;
           lineRepeatPassRef.current += 1;
           if (lineRepeatPassRef.current < repeatN) {
-            video.currentTime = cue.startMs / 1000;
-          } else {
-            lineRepeatPassRef.current = 0;
-            lineRepeatIndexRef.current = null;
-            const next = active + 1;
-            if (next < cues.length) {
-              playCue(next);
-            }
+            lineEndHandledRef.current = false;
+            video.currentTime = cue.startMs / 1000 + 0.02;
+            return;
           }
+          lineRepeatPassRef.current = 0;
+          lineRepeatIndexRef.current = null;
+          const next = idx + 1;
+          if (next < cues.length) {
+            playCue(next);
+          } else {
+            markUserPaused();
+            video.pause();
+          }
+          return;
         }
-        return;
+      } else if (
+        repeatIdx != null &&
+        cues[repeatIdx] &&
+        tMs < cues[repeatIdx]!.endMs - CUE_END_TOLERANCE_MS
+      ) {
+        lineEndHandledRef.current = false;
       }
-      lineEndHandledRef.current = false;
     }
 
     if (favoritePlaylistActive && playlistQueueRef.current.length > 0) {
@@ -272,9 +307,25 @@ export function RepeatPlayer({ mediaId }: Props) {
     cues,
     favoritePlaylistActive,
     findActiveIndex,
+    markUserPaused,
     playback.lineRepeatCount,
     playCue,
   ]);
+
+  useEffect(() => {
+    if (playback.lineRepeatCount <= 0) {
+      lineRepeatIndexRef.current = null;
+      lineRepeatPassRef.current = 0;
+      lineEndHandledRef.current = false;
+      return;
+    }
+    if (lineRepeatIndexRef.current != null) return;
+    const idx = lastActiveIndexRef.current ?? activeIndex ?? selectedIndex;
+    if (idx != null) {
+      lineRepeatIndexRef.current = idx;
+      lineRepeatPassRef.current = 0;
+    }
+  }, [activeIndex, playback.lineRepeatCount, selectedIndex]);
 
   useEffect(() => {
     const video = videoRef.current;
