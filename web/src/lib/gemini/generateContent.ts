@@ -1,3 +1,7 @@
+import {
+  buildGenerateContentRequest,
+  extractGeminiText,
+} from "@/lib/gemini/buildGenerateContentRequest";
 import { geminiModelChain, normalizeGeminiModel } from "@/lib/gemini/modelChain";
 
 const MODEL = normalizeGeminiModel(
@@ -64,13 +68,7 @@ export async function geminiGenerateText(prompt: string): Promise<string> {
       "Content-Type": "application/json",
       "x-goog-api-key": apiKey,
     },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.2,
-        maxOutputTokens: 8192,
-      },
-    }),
+    body: JSON.stringify(buildGenerateContentRequest(MODEL, prompt)),
   });
   const rawBody = await res.text();
   let data: GeminiResponse;
@@ -88,7 +86,7 @@ export async function geminiGenerateText(prompt: string): Promise<string> {
     const msg = data.error?.message ?? `Gemini API error (${res.status})`;
     throw new Error(formatGeminiError(msg, res.status));
   }
-  const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+  const text = extractGeminiText(data);
   if (!text.trim()) throw new Error("空の応答でした");
   return text.trim();
 }

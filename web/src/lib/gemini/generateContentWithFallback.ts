@@ -4,6 +4,10 @@ import {
   isRetryableGeminiError,
   sleep,
 } from "@/lib/gemini/retryableError";
+import {
+  buildGenerateContentRequest,
+  extractGeminiText,
+} from "@/lib/gemini/buildGenerateContentRequest";
 import { formatGeminiError, getGeminiApiKey } from "@/lib/gemini/generateContent";
 import { geminiModelChain } from "@/lib/gemini/modelChain";
 
@@ -24,23 +28,27 @@ async function generateOnce(model: string, prompt: string, apiKey: string): Prom
       "Content-Type": "application/json",
       "x-goog-api-key": apiKey,
     },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.2,
-        maxOutputTokens: 8192,
-      },
-    }),
+    body: JSON.stringify(buildGenerateContentRequest(model, prompt)),
   });
-  const data = (await res.json()) as GeminiResponse;
+  const rawBody = await res.text();
+  let data: GeminiResponse;
+  try {
+    data = JSON.parse(rawBody) as GeminiResponse;
+  } catch {
+    const snippet = rawBody.replace(/\s+/g, " ").trim().slice(0, 120);
+    throw new Error(
+      snippet.length === 0
+        ? "Gemini API が空の応答を返しました"
+        : `Gemini API の応答が JSON ではありません（${snippet}）`,
+    );
+  }
   if (!res.ok) {
     const msg = data.error?.message ?? `Gemini API error (${res.status})`;
     const err = new Error(formatGeminiError(msg, res.status));
     (err as Error & { status?: number }).status = res.status;
     throw err;
   }
-  const text =
-    data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+  const text = extractGeminiText(data);
   if (!text.trim()) throw new Error("空の応答でした");
   return text.trim();
 }

@@ -15,7 +15,7 @@ const PAUSE_BETWEEN_BATCH_MS = 4000;
 const STALE_PROGRESS_MS = 75_000;
 const GLOBAL_RESUME_MS = 8_000;
 /** 同一位置でこれ以上失敗したらプレースホルダを入れて先へ進む */
-const SKIP_BATCH_AFTER_FAILURES = 8;
+const SKIP_BATCH_AFTER_FAILURES = 5;
 
 export type TranslationProgress = {
   done: number;
@@ -44,14 +44,26 @@ function jobId(mediaId: string): string {
   return mediaId;
 }
 
-function progressTimestamp(job: TranslationJobRecord): number {
-  return job.lastProgressAt ?? job.updatedAt;
-}
-
-function isProgressStale(job: TranslationJobRecord): boolean {
+/** 行数が増えないまま、かつジョブ自体も更新されていないときだけ true */
+function isProgressStale(mediaId: string, job: TranslationJobRecord): boolean {
   if (job.status !== "running") return false;
   if (job.doneCues >= job.totalCues) return false;
-  return Date.now() - progressTimestamp(job) >= STALE_PROGRESS_MS;
+  if (activeLoopToken.has(mediaId)) return false;
+  if (job.nextAttemptAt != null && Date.now() < job.nextAttemptAt) return false;
+
+  const lastLineProgress = job.lastProgressAt ?? job.updatedAt;
+  if (Date.now() - lastLineProgress < STALE_PROGRESS_MS) return false;
+
+  const idleMs = Date.now() - job.updatedAt;
+  if (job.nextAttemptAt != null && Date.now() >= job.nextAttemptAt) {
+    return idleMs > 45_000;
+  }
+  return idleMs > 180_000;
+}
+
+function shortError(message: string, max = 72): string {
+  const one = message.replace(/\s+/g, " ").trim();
+  return one.length <= max ? one : `${one.slice(0, max)}…`;
 }
 
 function emitGlobal() {
@@ -190,7 +202,7 @@ export async function getTranslationJob(
 
 /** 待機中ジョブを即座に 1 バッチ試す */
 export async function kickTranslationJobNow(mediaId: string): Promise<void> {
-  killActiveLoop(mediaId);
+  if (activeLoopToken.has(mediaId)) return;
   const job = await getTranslationJob(mediaId);
   if (!job || job.status !== "running" || job.doneCues >= job.totalCues) return;
   const meta = await getMediaMeta(mediaId);
@@ -201,7 +213,8 @@ export async function kickTranslationJobNow(mediaId: string): Promise<void> {
     errorMessage: "手動で再開しています…",
     updatedAt: Date.now(),
   });
-  emit(mediaId, { ...job, nextAttemptAt: Date.now(), errorMessage: "手動で再開しています…" });
+  const kicked = await getTranslationJob(mediaId);
+  if (kicked) emit(mediaId, kicked);
   void runLoop(mediaId, meta.primarySrt);
 }
 
@@ -403,7 +416,7 @@ async function runLoop(mediaId: string, primarySrt: string): Promise<void> {
         const waiting = scheduleJobAttempt(latest, {
           consecutiveFailures: failures,
           delayMs: waitMs,
-          errorMessage: `再試行${formatHint}${rateHint} · ${Math.max(1, Math.round(waitMs / 1000))}秒後（${latest.doneCues}/${latest.totalCues}）`,
+          errorMessage: `再試行${formatHint}${rateHint} · ${Math.max(1, Math.round(waitMs / 1000))}秒後（${latest.doneCues}/${latest.totalCues}） — ${shortError(message)}`,
         });
         await upsertJob(waiting);
         emit(mediaId, waiting);
@@ -427,20 +440,18 @@ export async function resumeTranslationJobIfNeeded(mediaId: string): Promise<voi
   if (!meta?.primarySrt) return;
   if (job.sourceFingerprint !== fingerprintPrimarySrt(meta.primarySrt)) return;
 
-  const stale = isProgressStale(job);
   const loopAlive = activeLoopToken.has(mediaId);
+  if (loopAlive) return;
 
   const waitOver = job.nextAttemptAt == null || Date.now() >= job.nextAttemptAt;
-  const shouldRun =
-    job.status === "error" || stale || !loopAlive || (waitOver && !loopAlive);
+  const stale = isProgressStale(mediaId, job);
 
   if (stale) {
-    killActiveLoop(mediaId);
     await upsertJob({
       ...job,
       status: "running",
       nextAttemptAt: Date.now(),
-      errorMessage: "進捗が止まったため再開しています…",
+      errorMessage: "長時間動かないため再スケジュール…",
       updatedAt: Date.now(),
     });
     const refreshed = await getTranslationJob(mediaId);
@@ -449,7 +460,7 @@ export async function resumeTranslationJobIfNeeded(mediaId: string): Promise<voi
     return;
   }
 
-  if (shouldRun && waitOver) {
+  if ((job.status === "error" || waitOver) && waitOver) {
     void runLoop(mediaId, meta.primarySrt);
   }
 }
