@@ -14,13 +14,13 @@ const DEPRECATED_MODELS = new Set([
 
 /** 新規キー向け（2025末〜） */
 const DEFAULT_CHAIN = [
-  "gemini-3.6-flash",
-  "gemini-3.8-flash",
   "gemini-3-flash-preview",
+  "gemini-3.6-flash",
   "gemini-3.1-flash-lite",
+  "gemini-2.5-flash",
 ] as const;
 
-const DEFAULT_PRIMARY = "gemini-3.6-flash";
+const DEFAULT_PRIMARY = "gemini-3-flash-preview";
 
 export function normalizeGeminiModel(raw: string): string {
   const m = raw.trim();

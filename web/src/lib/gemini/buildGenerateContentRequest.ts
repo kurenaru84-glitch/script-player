@@ -1,17 +1,10 @@
-/** Gemini 3.x は temperature 非対応。3.8 は thinkingLevel が必要 */
-export function buildGenerateContentRequest(model: string, prompt: string): object {
-  const isGemini3 = /^gemini-3/i.test(model);
-  const generationConfig: Record<string, unknown> = {
-    maxOutputTokens: 8192,
-  };
-  if (isGemini3) {
-    generationConfig.thinkingConfig = { thinkingLevel: "low" };
-  } else {
-    generationConfig.temperature = 0.2;
-  }
+/** Gemini 3 は temperature 非推奨。thinkingConfig は API/キー差で落ちるため送らない */
+export function buildGenerateContentRequest(_model: string, prompt: string): object {
   return {
     contents: [{ parts: [{ text: prompt }] }],
-    generationConfig,
+    generationConfig: {
+      maxOutputTokens: 8192,
+    },
   };
 }
 

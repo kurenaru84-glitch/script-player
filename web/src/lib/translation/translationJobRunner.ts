@@ -200,15 +200,33 @@ export async function getTranslationJob(
   return getMetaDb().translationJobs.get(jobId(mediaId));
 }
 
-/** 待機中ジョブを即座に 1 バッチ試す */
+/** 待機中・停止中ジョブを即座に 1 バッチ試す */
 export async function kickTranslationJobNow(mediaId: string): Promise<void> {
-  if (activeLoopToken.has(mediaId)) return;
-  const job = await getTranslationJob(mediaId);
-  if (!job || job.status !== "running" || job.doneCues >= job.totalCues) return;
+  killActiveLoop(mediaId);
   const meta = await getMediaMeta(mediaId);
-  if (!meta?.primarySrt) return;
+  if (!meta?.primarySrt?.trim()) {
+    throw new Error("メイン字幕がありません");
+  }
+  let job = await getTranslationJob(mediaId);
+  const fp = fingerprintPrimarySrt(meta.primarySrt);
+  const cues = parseSrt(meta.primarySrt);
+  if (cues.length === 0) throw new Error("メイン字幕が空です");
+
+  if (!job || job.status === "done" || job.doneCues >= job.totalCues) {
+    await startTranslationJob(mediaId);
+    return;
+  }
+  if (job.totalCues !== cues.length) {
+    throw new Error(
+      "字幕の行数が変わりました。AI訳を長押し相当のやり直しが必要です（メディア画面から字幕を確認）",
+    );
+  }
+  if (job.sourceFingerprint !== fp) {
+    job = { ...job, sourceFingerprint: fp };
+  }
   await upsertJob({
     ...job,
+    status: "running",
     nextAttemptAt: Date.now(),
     errorMessage: "手動で再開しています…",
     updatedAt: Date.now(),
@@ -243,6 +261,29 @@ export async function startTranslationJob(
   await openMetaDb();
   let job = await getMetaDb().translationJobs.get(jobId(mediaId));
   const now = Date.now();
+
+  const fingerprintOnlyChange =
+    job &&
+    job.sourceFingerprint !== fp &&
+    job.totalCues === cues.length &&
+    !opts?.forceRestart;
+
+  if (fingerprintOnlyChange && job) {
+    const repaired: TranslationJobRecord = {
+      ...job,
+      sourceFingerprint: fp,
+      status: "running",
+      errorMessage: undefined,
+      nextAttemptAt: Date.now(),
+      updatedAt: now,
+    };
+    job = repaired;
+    await upsertJob(repaired);
+    killActiveLoop(mediaId);
+    emit(mediaId, repaired);
+    void runLoop(mediaId, meta.primarySrt);
+    return;
+  }
 
   if (
     opts?.forceRestart ||
@@ -432,13 +473,18 @@ async function runLoop(mediaId: string, primarySrt: string): Promise<void> {
 
 /** 未完了ジョブを再開 */
 export async function resumeTranslationJobIfNeeded(mediaId: string): Promise<void> {
-  const job = await getTranslationJob(mediaId);
+  let job = await getTranslationJob(mediaId);
   if (!job || job.status === "done" || job.status === "paused") return;
   if (job.doneCues >= job.totalCues) return;
 
   const meta = await getMediaMeta(mediaId);
   if (!meta?.primarySrt) return;
-  if (job.sourceFingerprint !== fingerprintPrimarySrt(meta.primarySrt)) return;
+  const fp = fingerprintPrimarySrt(meta.primarySrt);
+  if (job.sourceFingerprint !== fp) {
+    if (job.totalCues !== parseSrt(meta.primarySrt).length) return;
+    await upsertJob({ ...job, sourceFingerprint: fp, updatedAt: Date.now() });
+    job = (await getTranslationJob(mediaId)) ?? job;
+  }
 
   const loopAlive = activeLoopToken.has(mediaId);
   if (loopAlive) return;
