@@ -6,7 +6,7 @@ import {
   sleep,
 } from "@/lib/gemini/retryableError";
 
-const MAX_CLIENT_RETRIES = 8;
+const MAX_CLIENT_RETRIES = 4;
 
 export async function translateLinesViaApi(
   lines: string[],

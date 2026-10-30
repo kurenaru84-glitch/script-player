@@ -56,7 +56,7 @@ export async function geminiGenerateTextWithFallback(
 ): Promise<string> {
   const apiKey = getGeminiApiKey();
   const models = geminiModelChain();
-  const maxAttempts = opts?.maxAttemptsPerModel ?? 5;
+  const maxAttempts = opts?.maxAttemptsPerModel ?? 3;
   let lastError: Error | undefined;
 
   for (const model of models) {

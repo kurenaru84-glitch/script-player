@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   cancelTranslationJob,
+  kickTranslationJobNow,
   startTranslationJob,
   subscribeAllTranslationProgress,
   type TranslationProgressSnapshot,
@@ -53,7 +54,9 @@ export function TranslationProgressBanner() {
                 {isError
                   ? "AI翻訳が一時停止しました"
                   : waiting
-                    ? "AI翻訳 · 混雑のため待機中…"
+                    ? s.errorMessage?.includes("API混雑")
+                      ? "AI翻訳 · API混雑 · 待機中"
+                      : "AI翻訳 · 待機・再試行中"
                     : "AI翻訳を実行中"}
                 {s.total > 0 && (
                   <span className="ml-1 font-normal text-violet-800 dark:text-violet-200">
@@ -70,13 +73,24 @@ export function TranslationProgressBanner() {
                   続行
                 </button>
               ) : (
-                <button
-                  type="button"
-                  className="shrink-0 text-[10px] text-violet-700 underline dark:text-violet-300"
-                  onClick={() => void cancelTranslationJob(s.mediaId)}
-                >
-                  停止
-                </button>
+                <span className="flex shrink-0 gap-2">
+                  {waiting && (
+                    <button
+                      type="button"
+                      className="rounded-lg bg-violet-700 px-2 py-1 text-[10px] font-medium text-white"
+                      onClick={() => void kickTranslationJobNow(s.mediaId)}
+                    >
+                      今すぐ
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="text-[10px] text-violet-700 underline dark:text-violet-300"
+                    onClick={() => void cancelTranslationJob(s.mediaId)}
+                  >
+                    停止
+                  </button>
+                </span>
               )}
             </div>
             {!isError && s.total > 0 && (

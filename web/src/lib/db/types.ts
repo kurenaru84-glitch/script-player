@@ -41,5 +41,7 @@ export type TranslationJobRecord = {
   consecutiveFailures?: number;
   /** doneCues が最後に進んだ時刻（再試行だけでは更新しない） */
   lastProgressAt?: number;
+  /** この時刻以降に次バッチを試す（ループ内 sleep しない） */
+  nextAttemptAt?: number;
   updatedAt: number;
 };
