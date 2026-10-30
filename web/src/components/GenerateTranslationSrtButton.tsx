@@ -59,7 +59,9 @@ export function GenerateTranslationSrtButton({
   }, [mediaId]);
 
   const busy =
-    starting || progress?.status === "running" || Boolean(progress?.errorMessage?.includes("待機中"));
+    starting ||
+    progress?.status === "running" ||
+    Boolean(progress?.errorMessage?.match(/待機|混雑|再試行/i));
 
   const pct =
     progress && progress.total > 0

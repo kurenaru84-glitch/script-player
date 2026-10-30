@@ -20,14 +20,28 @@ export type TranslationProgress = {
   updatedAt?: number;
 };
 
+export type TranslationProgressSnapshot = TranslationProgress & {
+  mediaId: string;
+};
+
 type Listener = (p: TranslationProgress) => void;
+type GlobalListener = (snapshots: TranslationProgressSnapshot[]) => void;
 
 const listeners = new Map<string, Set<Listener>>();
+const globalListeners = new Set<GlobalListener>();
+const lastProgressByMedia = new Map<string, TranslationProgressSnapshot>();
 const runTokens = new Map<string, number>();
 const activeLoops = new Set<string>();
 
 function jobId(mediaId: string): string {
   return mediaId;
+}
+
+function emitGlobal() {
+  const list = [...lastProgressByMedia.values()].filter(
+    (s) => s.status !== "done" && s.status !== "paused",
+  );
+  for (const fn of globalListeners) fn(list);
 }
 
 function emit(mediaId: string, job: TranslationJobRecord) {
@@ -39,6 +53,35 @@ function emit(mediaId: string, job: TranslationJobRecord) {
     updatedAt: job.updatedAt,
   };
   for (const fn of listeners.get(mediaId) ?? []) fn(p);
+  if (job.status === "done" || job.status === "paused") {
+    lastProgressByMedia.delete(mediaId);
+  } else {
+    lastProgressByMedia.set(mediaId, { ...p, mediaId });
+  }
+  emitGlobal();
+}
+
+export function subscribeAllTranslationProgress(
+  listener: GlobalListener,
+): () => void {
+  globalListeners.add(listener);
+  listener([...lastProgressByMedia.values()].filter((s) => s.status !== "done"));
+  void openMetaDb().then(async () => {
+    const jobs = await getMetaDb().translationJobs.toArray();
+    for (const j of jobs) {
+      if (j.status === "done" || j.status === "paused") continue;
+      lastProgressByMedia.set(j.mediaId, {
+        mediaId: j.mediaId,
+        done: j.doneCues,
+        total: j.totalCues,
+        status: j.status,
+        errorMessage: j.errorMessage,
+        updatedAt: j.updatedAt,
+      });
+    }
+    emitGlobal();
+  });
+  return () => globalListeners.delete(listener);
 }
 
 export function subscribeTranslationProgress(
