@@ -1,4 +1,9 @@
-import { backoffMs, isRetryableGeminiError, sleep } from "@/lib/gemini/retryableError";
+import {
+  backoffMs,
+  isModelUnavailableError,
+  isRetryableGeminiError,
+  sleep,
+} from "@/lib/gemini/retryableError";
 
 const MAX_CLIENT_RETRIES = 8;
 
@@ -64,6 +69,11 @@ async function fetchBatchWithRetries(lines: string[]): Promise<string[]> {
       return data.translations;
     }
     const message = data.error ?? "翻訳 API エラー";
+    if (isModelUnavailableError(message, res.status)) {
+      throw new Error(
+        `${message} （サーバー側で別モデルへ切替済みのはずです。Redeploy 後も出る場合 Vercel の GEMINI_MODEL を gemini-2.0-flash に）`,
+      );
+    }
     if (isRetryableGeminiError(message, res.status) && attempt < MAX_CLIENT_RETRIES) {
       await sleep(backoffMs(attempt));
       continue;

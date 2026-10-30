@@ -1,9 +1,11 @@
 import {
   backoffMs,
+  isModelUnavailableError,
   isRetryableGeminiError,
   sleep,
 } from "@/lib/gemini/retryableError";
 import { formatGeminiError, getGeminiApiKey } from "@/lib/gemini/generateContent";
+import { geminiModelChain } from "@/lib/gemini/modelChain";
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
@@ -13,19 +15,6 @@ type GeminiResponse = {
   }>;
   error?: { message?: string; code?: number };
 };
-
-function defaultModels(): string[] {
-  const primary = process.env.GEMINI_MODEL?.trim() || "gemini-3.5-flash";
-  const fallbacks = (process.env.GEMINI_MODEL_FALLBACKS ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const chain = [primary, ...fallbacks];
-  if (!chain.includes("gemini-3.5-flash")) chain.push("gemini-3.5-flash");
-  if (!chain.includes("gemini-2.5-flash")) chain.push("gemini-2.5-flash");
-  if (!chain.includes("gemini-2.0-flash")) chain.push("gemini-2.0-flash");
-  return [...new Set(chain)];
-}
 
 async function generateOnce(model: string, prompt: string, apiKey: string): Promise<string> {
   const url = `${API_BASE}/${model}:generateContent`;
@@ -60,13 +49,13 @@ export type GeminiGenerateOptions = {
   maxAttemptsPerModel?: number;
 };
 
-/** 429 / high demand 時は待機→同一モデル再試行→次モデルへフォールバック */
+/** 429 / high demand 時は待機→再試行。モデル廃止時は次モデルへ */
 export async function geminiGenerateTextWithFallback(
   prompt: string,
   opts?: GeminiGenerateOptions,
 ): Promise<string> {
   const apiKey = getGeminiApiKey();
-  const models = defaultModels();
+  const models = geminiModelChain();
   const maxAttempts = opts?.maxAttemptsPerModel ?? 5;
   let lastError: Error | undefined;
 
@@ -78,6 +67,9 @@ export async function geminiGenerateTextWithFallback(
         const err = e instanceof Error ? e : new Error(String(e));
         lastError = err;
         const status = (err as Error & { status?: number }).status;
+        if (isModelUnavailableError(err.message, status)) {
+          break;
+        }
         if (!isRetryableGeminiError(err.message, status)) {
           throw err;
         }
@@ -89,5 +81,10 @@ export async function geminiGenerateTextWithFallback(
     }
   }
 
-  throw lastError ?? new Error("Gemini 翻訳に失敗しました");
+  throw (
+    lastError ??
+    new Error(
+      "Gemini 翻訳に失敗しました。Vercel の GEMINI_MODEL を gemini-2.0-flash に設定して Redeploy してください。",
+    )
+  );
 }

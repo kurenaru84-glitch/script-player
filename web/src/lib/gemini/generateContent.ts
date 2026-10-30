@@ -1,4 +1,8 @@
-const MODEL = process.env.GEMINI_MODEL?.trim() || "gemini-3.5-flash";
+import { geminiModelChain, normalizeGeminiModel } from "@/lib/gemini/modelChain";
+
+const MODEL = normalizeGeminiModel(
+  process.env.GEMINI_MODEL?.trim() || geminiModelChain()[0] || "gemini-2.0-flash",
+);
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
 type GeminiResponse = {
@@ -46,7 +50,7 @@ export function formatGeminiError(message: string, status: number): string {
     ].join(" ");
   }
   if (status === 404 || /not found/i.test(message)) {
-    return `${message} （GEMINI_MODEL=${MODEL} が無効な可能性。gemini-3.5-flash 等に変更）`;
+    return `${message} （GEMINI_MODEL=${MODEL} が無効です。Vercel で gemini-2.0-flash または gemini-3.5-flash に変更して Redeploy）`;
   }
   return message;
 }

@@ -2,7 +2,12 @@ import { getMediaMeta, updateMedia } from "@/lib/db/clientDb";
 import { getMetaDb, openMetaDb } from "@/lib/db/metaDb";
 import type { TranslationJobRecord } from "@/lib/db/types";
 import { fingerprintPrimarySrt } from "@/lib/translation/fingerprintPrimarySrt";
-import { isRetryableGeminiError, backoffMs, sleep } from "@/lib/gemini/retryableError";
+import {
+  isModelUnavailableError,
+  isRetryableGeminiError,
+  backoffMs,
+  sleep,
+} from "@/lib/gemini/retryableError";
 import { translateLinesViaApi } from "@/lib/translation/translateBatchClient";
 import { parseSrt } from "@/lib/subtitle/parseSrt";
 import { serializeSrt } from "@/lib/subtitle/serializeSrt";
@@ -256,7 +261,7 @@ async function runLoop(mediaId: string, primarySrt: string): Promise<void> {
           return;
         }
 
-        if (isRetryableGeminiError(message)) {
+        if (isRetryableGeminiError(message) || isModelUnavailableError(message)) {
           const waiting: TranslationJobRecord = {
             ...job,
             consecutiveFailures: failures,
