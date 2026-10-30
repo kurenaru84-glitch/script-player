@@ -15,7 +15,7 @@ import {
   loadVideoObjectUrl,
   peekVideoObjectUrl,
 } from "@/lib/videoObjectUrlCache";
-import { alignBilingual } from "@/lib/subtitle/alignBilingual";
+import { loadBilingualSubtitles } from "@/lib/subtitle/loadBilingualSubtitles";
 import { parseSrt } from "@/lib/subtitle/parseSrt";
 import type { BilingualCue } from "@/lib/subtitle/types";
 import { GenerateTranslationSrtButton } from "@/components/GenerateTranslationSrtButton";
@@ -25,6 +25,7 @@ import {
 } from "@/components/PlayerPlaybackSettings";
 import { VideoSubtitleOverlay } from "@/components/VideoSubtitleOverlay";
 import { setLastMediaId } from "@/lib/lastMediaId";
+import { useBackgroundPlayback } from "@/lib/useBackgroundPlayback";
 import { useMediaSession } from "@/lib/useMediaSession";
 
 const PLAYER_HEIGHT = "calc(100dvh - 4.25rem - env(safe-area-inset-bottom, 0px))";
@@ -69,6 +70,7 @@ export function RepeatPlayer({ mediaId }: Props) {
   const noteFocusedRef = useRef(false);
   const lastScrolledIndex = useRef<number | null>(null);
   const lastActiveIndexRef = useRef<number | null>(null);
+  const { markUserPaused, markUserPlay } = useBackgroundPlayback(videoEl);
 
   const reloadMetaOnly = useCallback(
     async (opts?: { showLoading?: boolean }) => {
@@ -82,9 +84,7 @@ export function RepeatPlayer({ mediaId }: Props) {
           return;
         }
         setTitle(meta.title);
-        setCues(
-          alignBilingual(parseSrt(meta.primarySrt), parseSrt(meta.translationSrt)),
-        );
+        setCues(loadBilingualSubtitles(meta).cues);
         setNotedIndices(await noteCueIndices(mediaId));
         setFavoriteIndices(await favoriteCueIndices(mediaId));
       } catch (e) {
@@ -191,11 +191,12 @@ export function RepeatPlayer({ mediaId }: Props) {
         playlistStepRef.current = 0;
       }
       video.currentTime = cue.startMs / 1000;
+      markUserPlay();
       void video.play().catch(() => {
         setVideoPlayError("再生できません。プロパティから MP4 を選び直してください。");
       });
     },
-    [cues],
+    [cues, markUserPlay],
   );
 
   const goRelative = useCallback(
@@ -287,20 +288,28 @@ export function RepeatPlayer({ mediaId }: Props) {
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) {
+      markUserPlay();
       void video.play().catch((e: unknown) => {
         setVideoPlayError(
           e instanceof Error ? e.message : "再生できませんでした（タップして再試行）",
         );
       });
     } else {
+      markUserPaused();
       video.pause();
     }
-  }, []);
+  }, [markUserPaused, markUserPlay]);
 
   useMediaSession(videoEl, {
     title: title || "Script Player",
-    onPlay: () => videoRef.current?.play(),
-    onPause: () => videoRef.current?.pause(),
+    onPlay: () => {
+      markUserPlay();
+      void videoRef.current?.play();
+    },
+    onPause: () => {
+      markUserPaused();
+      videoRef.current?.pause();
+    },
     onPrevious: () => goRelative(-1),
     onNext: () => goRelative(1),
   });
@@ -441,6 +450,7 @@ export function RepeatPlayer({ mediaId }: Props) {
                 src={videoUrl}
                 playsInline
                 preload="auto"
+                disableRemotePlayback={false}
                 className="aspect-video max-h-[min(42vh,280px)] w-full cursor-pointer object-contain"
                 onClick={() => togglePlayPause()}
                 onTimeUpdate={onTimeUpdate}

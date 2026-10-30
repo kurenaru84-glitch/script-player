@@ -8,8 +8,8 @@ import { VideoSubtitleOverlay } from "@/components/VideoSubtitleOverlay";
 import { maskPrimaryLine } from "@/lib/subtitle/maskPrimaryLine";
 import { getMediaMeta } from "@/lib/db/clientDb";
 import { setLastMediaId } from "@/lib/lastMediaId";
-import { alignBilingual } from "@/lib/subtitle/alignBilingual";
-import { parseSrt } from "@/lib/subtitle/parseSrt";
+import { loadBilingualSubtitles } from "@/lib/subtitle/loadBilingualSubtitles";
+import { useBackgroundPlayback } from "@/lib/useBackgroundPlayback";
 import type { BilingualCue } from "@/lib/subtitle/types";
 import {
   loadVideoObjectUrl,
@@ -35,6 +35,8 @@ export function DictationScreen({ mediaId }: Props) {
   const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(1.0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
+  const { markUserPaused, markUserPlay } = useBackgroundPlayback(videoEl);
 
   useEffect(() => {
     setLastMediaId(mediaId);
@@ -51,10 +53,7 @@ export function DictationScreen({ mediaId }: Props) {
           return;
         }
         setTitle(meta.title);
-        const aligned = alignBilingual(
-          parseSrt(meta.primarySrt),
-          parseSrt(meta.translationSrt),
-        );
+        const { cues: aligned } = loadBilingualSubtitles(meta);
         setCues(aligned);
         const start =
           !Number.isNaN(initialCue) && initialCue >= 0 && initialCue < aligned.length
@@ -95,10 +94,11 @@ export function DictationScreen({ mediaId }: Props) {
       setLineIndex(index);
       video.currentTime = c.startMs / 1000;
       if (autoplay) {
+        markUserPlay();
         void video.play().catch(() => undefined);
       }
     },
-    [cues],
+    [cues, markUserPlay],
   );
 
   useEffect(() => {
@@ -182,7 +182,10 @@ export function DictationScreen({ mediaId }: Props) {
       <div className="relative mx-auto w-full max-w-md shrink-0 overflow-hidden rounded-xl bg-black shadow-md">
         {videoUrl ? (
           <video
-            ref={videoRef}
+            ref={(el) => {
+              videoRef.current = el;
+              setVideoEl(el);
+            }}
             src={videoUrl}
             playsInline
             preload="auto"

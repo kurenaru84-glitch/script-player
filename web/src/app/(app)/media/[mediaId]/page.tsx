@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { GenerateTranslationSrtButton } from "@/components/GenerateTranslationSrtButton";
+import { SubtitleRefinePanel } from "@/components/SubtitleRefinePanel";
+import { refineSubtitlePair } from "@/lib/subtitle/refineSubtitles";
 import { formatStorageError } from "@/lib/db/errors";
 import { getMediaMeta, updateMedia } from "@/lib/db/clientDb";
 import { storeVideoBlob } from "@/lib/videoStorage/loadVideoBlob";
@@ -57,11 +59,28 @@ export default function MediaPropertiesPage() {
     setMessage(null);
     try {
       const text = await file.text();
+      const meta = await getMediaMeta(mediaId);
       if (kind === "primary") {
-        await updateMedia(mediaId, { primarySrt: text });
-        setMessage("メイン字幕を差し替えました");
+        const refined = refineSubtitlePair(text, meta?.translationSrt ?? "", {
+          enabled: meta?.subtitleAutoMerge !== false,
+        });
+        await updateMedia(mediaId, {
+          primarySrt: refined.primarySrt,
+          translationSrt: refined.translationSrt,
+        });
+        setMessage(
+          refined.mergedCount > 0
+            ? `メイン字幕を差し替え、${refined.mergedCount} 箇所を自動結合しました`
+            : "メイン字幕を差し替えました",
+        );
       } else {
-        await updateMedia(mediaId, { translationSrt: text });
+        const refined = refineSubtitlePair(meta?.primarySrt ?? text, text, {
+          enabled: meta?.subtitleAutoMerge !== false,
+        });
+        await updateMedia(mediaId, {
+          primarySrt: refined.primarySrt,
+          translationSrt: refined.translationSrt,
+        });
         setMessage("翻訳字幕を差し替えました");
       }
       router.push(`/player/${mediaId}`);
@@ -114,6 +133,8 @@ export default function MediaPropertiesPage() {
         variant="panel"
         onComplete={() => router.push(`/player/${mediaId}`)}
       />
+
+      <SubtitleRefinePanel mediaId={mediaId} />
 
       <hr className="border-zinc-200 dark:border-zinc-700" />
 

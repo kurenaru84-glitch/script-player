@@ -30,14 +30,33 @@ export function useMediaSession(video: HTMLVideoElement | null, handlers: Handle
 
     const syncState = () => {
       navigator.mediaSession.playbackState = video.paused ? "paused" : "playing";
+      if (
+        "setPositionState" in navigator.mediaSession &&
+        Number.isFinite(video.duration) &&
+        video.duration > 0
+      ) {
+        try {
+          navigator.mediaSession.setPositionState({
+            duration: video.duration,
+            playbackRate: video.playbackRate,
+            position: Math.min(video.currentTime, video.duration),
+          });
+        } catch {
+          /* 非対応 */
+        }
+      }
     };
     video.addEventListener("play", syncState);
     video.addEventListener("pause", syncState);
+    video.addEventListener("timeupdate", syncState);
     syncState();
+    const tick = window.setInterval(syncState, 5000);
 
     return () => {
+      window.clearInterval(tick);
       video.removeEventListener("play", syncState);
       video.removeEventListener("pause", syncState);
+      video.removeEventListener("timeupdate", syncState);
       navigator.mediaSession.setActionHandler("play", null);
       navigator.mediaSession.setActionHandler("pause", null);
       navigator.mediaSession.setActionHandler("previoustrack", null);

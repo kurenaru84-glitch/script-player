@@ -6,6 +6,8 @@ export type MediaMeta = {
   createdAt: number;
   /** OPFS 保存後の整合性チェック用（バイト） */
   videoByteSize?: number;
+  /** 読み込み時に文の途中で切れた字幕を自動結合（既定 true） */
+  subtitleAutoMerge?: boolean;
 };
 
 export type VocabNote = {

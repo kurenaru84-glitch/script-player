@@ -5,6 +5,7 @@ import { useState } from "react";
 import { MobileAccessHint } from "@/components/MobileAccessHint";
 import { formatStorageError } from "@/lib/db/errors";
 import { saveMedia } from "@/lib/db/clientDb";
+import { refineSubtitlePair } from "@/lib/subtitle/refineSubtitles";
 import { requestPersistentStorage } from "@/lib/videoStorage/opfs";
 import { warmVideoObjectUrl } from "@/lib/videoObjectUrlCache";
 
@@ -34,11 +35,12 @@ export default function LocalFilesPage() {
         primaryFile.text(),
         translationFile ? translationFile.text() : Promise.resolve(""),
       ]);
+      const refined = refineSubtitlePair(primarySrt, translationSrt, { enabled: true });
       const id = await saveMedia({
         title: title.trim() || videoFile.name.replace(/\.[^.]+$/, ""),
         videoBlob: videoFile,
-        primarySrt,
-        translationSrt,
+        primarySrt: refined.primarySrt,
+        translationSrt: refined.translationSrt,
       });
       warmVideoObjectUrl(id, videoFile);
       router.push(`/player/${id}`);

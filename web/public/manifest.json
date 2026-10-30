@@ -4,6 +4,7 @@
   "description": "動画＋二言語字幕のリピート学習（端末内保存）",
   "start_url": "/my-list",
   "display": "standalone",
+  "categories": ["education", "entertainment"],
   "background_color": "#fafafa",
   "theme_color": "#0284c7",
   "lang": "ja",

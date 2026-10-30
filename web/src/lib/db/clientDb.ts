@@ -95,7 +95,10 @@ export async function saveMedia(
 export async function updateMedia(
   id: string,
   patch: Partial<
-    Pick<MediaMeta, "title" | "primarySrt" | "translationSrt" | "videoByteSize">
+    Pick<
+      MediaMeta,
+      "title" | "primarySrt" | "translationSrt" | "videoByteSize" | "subtitleAutoMerge"
+    >
   >,
 ): Promise<void> {
   const existing = await getMediaMeta(id);
