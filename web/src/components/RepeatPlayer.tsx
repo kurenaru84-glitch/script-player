@@ -412,9 +412,9 @@ export function RepeatPlayer({ mediaId }: Props) {
       className="relative flex flex-col"
       style={{ height: PLAYER_HEIGHT, maxHeight: PLAYER_HEIGHT }}
     >
-      <div className="flex shrink-0 items-center justify-between gap-2 pb-2">
-          <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">{title}</h1>
-          <div className="flex shrink-0 items-center gap-2 text-sm">
+      <div className="min-w-0 shrink-0 space-y-2 pb-2">
+          <h1 className="truncate text-lg font-semibold">{title}</h1>
+          <div className="flex min-w-0 items-center gap-2 overflow-x-auto overscroll-x-contain text-sm [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <PlayerPlaybackSettings value={playback} onChange={setPlayback} />
             <GenerateTranslationSrtButton
               mediaId={mediaId}
@@ -423,23 +423,26 @@ export function RepeatPlayer({ mediaId }: Props) {
             />
             <Link
               href={`/dictation/${mediaId}?cue=${dictationCueParam}`}
-              className="text-sky-600"
+              className="shrink-0 text-sky-600"
             >
               ディクテ
             </Link>
-            <Link href={`/media/${mediaId}/subtitles`} className="text-sky-600">
+            <Link
+              href={`/media/${mediaId}/subtitles`}
+              className="shrink-0 text-sky-600"
+            >
               字幕編集
             </Link>
-            <Link href={`/media/${mediaId}`} className="text-sky-600">
+            <Link href={`/media/${mediaId}`} className="shrink-0 text-sky-600">
               設定
             </Link>
-            <Link href="/my-list" className="text-sky-600">
+            <Link href="/my-list" className="shrink-0 text-sky-600">
               一覧
             </Link>
           </div>
       </div>
 
-      <div className="sticky top-0 z-30 -mx-1 shrink-0 space-y-2 rounded-xl border border-zinc-200 bg-white/95 p-2 shadow-sm backdrop-blur dark:border-zinc-700 dark:bg-zinc-950/95">
+      <div className="sticky top-0 z-30 shrink-0 space-y-2 rounded-xl border border-zinc-200 bg-white/95 p-2 shadow-sm backdrop-blur dark:border-zinc-700 dark:bg-zinc-950/95">
           <div className="relative overflow-hidden rounded-lg bg-black">
             {videoLoading || !videoUrl ? (
               <div className="flex aspect-video max-h-[min(42vh,280px)] min-h-[140px] flex-col items-center justify-center gap-2 px-2 text-center text-xs text-zinc-300">
