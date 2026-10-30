@@ -6,13 +6,13 @@
  *   GEMINI_API_KEY=AIza... node web/scripts/translate-srt-file.mjs input.en.srt output.ja.srt
  *
  * Options:
- *   GEMINI_MODEL=gemini-3.5-flash  BATCH=20  SLEEP_MS=3000
+ *   GEMINI_MODEL=gemini-3.8-flash  BATCH=20  SLEEP_MS=3000
  */
 
 import fs from "node:fs";
 import path from "node:path";
 
-const MODEL = (process.env.GEMINI_MODEL ?? "gemini-3.5-flash").trim();
+const MODEL = (process.env.GEMINI_MODEL ?? "gemini-3.8-flash").trim();
 const BATCH = Number(process.env.BATCH ?? "20");
 const SLEEP_MS = Number(process.env.SLEEP_MS ?? "3500");
 const MAX_RETRIES = Number(process.env.MAX_RETRIES ?? "6");

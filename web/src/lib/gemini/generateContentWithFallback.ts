@@ -84,7 +84,7 @@ export async function geminiGenerateTextWithFallback(
   throw (
     lastError ??
     new Error(
-      "Gemini 翻訳に失敗しました。Vercel の GEMINI_MODEL を gemini-2.0-flash に設定して Redeploy してください。",
+      "Gemini 翻訳に失敗しました。Vercel の GEMINI_MODEL を gemini-3.8-flash に設定して Redeploy してください。",
     )
   );
 }

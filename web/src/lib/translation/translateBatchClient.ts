@@ -71,7 +71,7 @@ async function fetchBatchWithRetries(lines: string[]): Promise<string[]> {
     const message = data.error ?? "翻訳 API エラー";
     if (isModelUnavailableError(message, res.status)) {
       throw new Error(
-        `${message} （サーバー側で別モデルへ切替済みのはずです。Redeploy 後も出る場合 Vercel の GEMINI_MODEL を gemini-2.0-flash に）`,
+        `${message} （Redeploy 後も出る場合 Vercel の GEMINI_MODEL を gemini-3.8-flash に）`,
       );
     }
     if (isRetryableGeminiError(message, res.status) && attempt < MAX_CLIENT_RETRIES) {
