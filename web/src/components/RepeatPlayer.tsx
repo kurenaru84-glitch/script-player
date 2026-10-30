@@ -19,6 +19,7 @@ import { alignBilingual } from "@/lib/subtitle/alignBilingual";
 import { parseSrt } from "@/lib/subtitle/parseSrt";
 import type { BilingualCue } from "@/lib/subtitle/types";
 import { GenerateTranslationSrtButton } from "@/components/GenerateTranslationSrtButton";
+import { VideoSubtitleOverlay } from "@/components/VideoSubtitleOverlay";
 import { setLastMediaId } from "@/lib/lastMediaId";
 import { useMediaSession } from "@/lib/useMediaSession";
 
@@ -324,11 +325,13 @@ export function RepeatPlayer({ mediaId }: Props) {
     }
   };
 
+  /** 再生中はタイムコードに合わせて更新、停止中は選択行 */
   const overlayCue = useMemo(() => {
+    if (isPlaying && activeIndex != null) return cues[activeIndex] ?? null;
     if (selectedIndex != null) return cues[selectedIndex] ?? null;
     if (activeIndex != null) return cues[activeIndex] ?? null;
     return null;
-  }, [activeIndex, cues, selectedIndex]);
+  }, [activeIndex, cues, isPlaying, selectedIndex]);
 
   const dictationCueParam =
     selectedIndex ?? activeIndex ?? (initialCue >= 0 ? initialCue : 0);
@@ -417,16 +420,7 @@ export function RepeatPlayer({ mediaId }: Props) {
                 {loadError ?? videoPlayError}
               </p>
             )}
-            {overlayCue && (
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent px-2 pb-1 pt-6 text-white">
-                <p className="line-clamp-2 text-xs font-medium">{overlayCue.primary}</p>
-                {overlayCue.translation && (
-                  <p className="line-clamp-1 text-[10px] text-zinc-300">
-                    {overlayCue.translation}
-                  </p>
-                )}
-              </div>
-            )}
+            <VideoSubtitleOverlay cue={overlayCue} />
           </div>
 
           <div className="flex flex-wrap items-center gap-2">

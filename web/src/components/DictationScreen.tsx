@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DictationPanel } from "@/components/DictationPanel";
+import { VideoSubtitleOverlay } from "@/components/VideoSubtitleOverlay";
+import { maskPrimaryLine } from "@/lib/subtitle/maskPrimaryLine";
 import { getMediaMeta } from "@/lib/db/clientDb";
 import { setLastMediaId } from "@/lib/lastMediaId";
 import { alignBilingual } from "@/lib/subtitle/alignBilingual";
@@ -32,6 +34,7 @@ export function DictationScreen({ mediaId }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(1.0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
 
   useEffect(() => {
     setLastMediaId(mediaId);
@@ -70,6 +73,20 @@ export function DictationScreen({ mediaId }: Props) {
 
   const cue = cues[lineIndex];
 
+  const findActiveIndex = useCallback(
+    (timeSec: number): number | null => {
+      const ms = timeSec * 1000;
+      const idx = cues.findIndex((c) => ms >= c.startMs && ms < c.endMs);
+      return idx >= 0 ? idx : null;
+    },
+    [cues],
+  );
+
+  const overlayCue = useMemo(() => {
+    const idx = activeIndex ?? lineIndex;
+    return cues[idx] ?? cue ?? null;
+  }, [activeIndex, cue, cues, lineIndex]);
+
   const playLine = useCallback(
     (index: number, autoplay = true) => {
       const c = cues[index];
@@ -98,10 +115,12 @@ export function DictationScreen({ mediaId }: Props) {
     const video = videoRef.current;
     const c = cues[lineIndex];
     if (!video || !c) return;
+    const active = findActiveIndex(video.currentTime);
+    setActiveIndex(active);
     if (video.currentTime >= c.endMs / 1000 - 0.05) {
       video.currentTime = c.startMs / 1000;
     }
-  }, [cues, lineIndex]);
+  }, [cues, findActiveIndex, lineIndex]);
 
   const goRelative = (delta: number) => {
     const next = Math.min(Math.max(lineIndex + delta, 0), cues.length - 1);
@@ -109,10 +128,9 @@ export function DictationScreen({ mediaId }: Props) {
   };
 
   const maskedLine = useMemo(() => {
-    if (!cue) return "";
-    const len = Math.min(Math.max(cue.primary.length, 12), 48);
-    return "·".repeat(Math.ceil(len / 2));
-  }, [cue]);
+    if (!overlayCue) return "";
+    return maskPrimaryLine(overlayCue.primary);
+  }, [overlayCue]);
 
   if (loading) {
     return (
@@ -145,7 +163,7 @@ export function DictationScreen({ mediaId }: Props) {
         </Link>
         <div className="min-w-0 flex-1">
           <p className="truncate text-xs font-medium text-zinc-800 dark:text-zinc-200">
-            #{cue.index} · {title}
+            #{overlayCue?.index ?? cue.index} · {title}
           </p>
         </div>
         <Link
@@ -178,6 +196,7 @@ export function DictationScreen({ mediaId }: Props) {
             動画なし
           </div>
         )}
+        <VideoSubtitleOverlay cue={overlayCue} maskPrimary />
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
