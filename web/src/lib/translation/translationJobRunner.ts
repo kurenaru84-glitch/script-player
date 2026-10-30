@@ -7,6 +7,7 @@ import {
   backoffMs,
   sleep,
 } from "@/lib/gemini/retryableError";
+import { detectSourceLanguage } from "@/lib/translation/detectSourceLanguage";
 import { translateLinesViaApi } from "@/lib/translation/translateBatchClient";
 import { parseSrt } from "@/lib/subtitle/parseSrt";
 import { serializeSrt } from "@/lib/subtitle/serializeSrt";
@@ -18,6 +19,8 @@ const MAX_BATCH_FAILURES = 18;
 const STALE_PROGRESS_MS = 90_000;
 const AUTO_COOLDOWN_MS = 75_000;
 const GLOBAL_RESUME_MS = 15_000;
+/** 同一位置でこれ以上失敗したらプレースホルダを入れて先へ進む */
+const SKIP_BATCH_AFTER_FAILURES = 14;
 
 export type TranslationProgress = {
   done: number;
@@ -127,6 +130,20 @@ async function savePartialTranslation(
     text: lines[i]?.trim() ?? "",
   }));
   await updateMedia(mediaId, { translationSrt: serializeSrt(merged) });
+}
+
+async function persistJobProgress(
+  mediaId: string,
+  primarySrt: string,
+  next: TranslationJobRecord,
+): Promise<void> {
+  await upsertJob(next);
+  try {
+    await savePartialTranslation(mediaId, primarySrt, next.lines);
+  } catch {
+    /* IndexedDB 保存失敗でもジョブ進捗は保持 */
+  }
+  emit(mediaId, next);
 }
 
 async function upsertJob(job: TranslationJobRecord): Promise<void> {
@@ -246,6 +263,12 @@ async function runLoop(mediaId: string, primarySrt: string): Promise<void> {
   runTokens.set(mediaId, token);
   activeLoopToken.set(mediaId, token);
 
+  const sourceLanguage = detectSourceLanguage(
+    parseSrt(primarySrt)
+      .slice(0, 60)
+      .map((c) => c.text),
+  );
+
   try {
     await withScreenWakeLock(async () => {
       while (true) {
@@ -278,6 +301,7 @@ async function runLoop(mediaId: string, primarySrt: string): Promise<void> {
         try {
           const translated = await translateLinesViaApi(batchTexts, {
             signal: batchAbort.signal,
+            sourceLanguage,
           });
           batchAbortByMedia.delete(mediaId);
 
@@ -297,9 +321,7 @@ async function runLoop(mediaId: string, primarySrt: string): Promise<void> {
             lastProgressAt: now,
             updatedAt: now,
           };
-          await upsertJob(next);
-          await savePartialTranslation(mediaId, primarySrt, lines);
-          emit(mediaId, next);
+          await persistJobProgress(mediaId, primarySrt, next);
 
           if (batchEnd < job.totalCues) {
             await sleep(PAUSE_BETWEEN_BATCH_MS);
@@ -309,11 +331,40 @@ async function runLoop(mediaId: string, primarySrt: string): Promise<void> {
           if (loopTokenMismatch(mediaId, token)) return;
 
           const message = e instanceof Error ? e.message : "翻訳に失敗しました";
-          if (/aborted|AbortError/i.test(message)) {
-            return;
+          if (/aborted|AbortError|中断されました/i.test(message)) {
+            continue;
           }
 
-          const failures = (job.consecutiveFailures ?? 0) + 1;
+          const latest =
+            (await getMetaDb().translationJobs.get(jobId(mediaId))) ?? job;
+          if (latest.doneCues > job.doneCues) {
+            continue;
+          }
+
+          const failures = (latest.consecutiveFailures ?? 0) + 1;
+
+          if (failures >= SKIP_BATCH_AFTER_FAILURES) {
+            const lines = [...latest.lines];
+            for (let i = 0; i < batchTexts.length; i++) {
+              const idx = start + i;
+              if (!lines[idx]?.trim()) {
+                lines[idx] = `［要修正］${batchTexts[i] ?? ""}`;
+              }
+            }
+            const now = Date.now();
+            const skipped: TranslationJobRecord = {
+              ...latest,
+              lines,
+              doneCues: batchEnd,
+              consecutiveFailures: 0,
+              errorMessage: `行${start + 1}付近をスキップして続行（${batchEnd}/${latest.totalCues}）`,
+              lastProgressAt: now,
+              updatedAt: now,
+            };
+            await persistJobProgress(mediaId, primarySrt, skipped);
+            continue;
+          }
+
           const formatHint = isTranslationFormatError(message) ? "（JSON形式）" : "";
           const waitMs =
             failures >= MAX_BATCH_FAILURES
@@ -321,10 +372,10 @@ async function runLoop(mediaId: string, primarySrt: string): Promise<void> {
               : backoffMs(Math.min(failures, 8), 3500);
 
           const waiting: TranslationJobRecord = {
-            ...job,
+            ...latest,
             status: "running",
             consecutiveFailures: failures >= MAX_BATCH_FAILURES ? 0 : failures,
-            errorMessage: `自動再試行${formatHint}… ${Math.round(waitMs / 1000)}秒後（${job.doneCues}/${job.totalCues}）`,
+            errorMessage: `自動再試行${formatHint}… ${Math.round(waitMs / 1000)}秒後（${latest.doneCues}/${latest.totalCues}）`,
             updatedAt: Date.now(),
           };
           await upsertJob(waiting);

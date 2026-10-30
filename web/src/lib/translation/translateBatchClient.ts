@@ -10,11 +10,11 @@ const MAX_CLIENT_RETRIES = 8;
 
 export async function translateLinesViaApi(
   lines: string[],
-  opts?: { signal?: AbortSignal },
+  opts?: { signal?: AbortSignal; sourceLanguage?: string },
 ): Promise<string[]> {
   if (lines.length === 0) return [];
   try {
-    return await fetchBatchWithRetries(lines, opts?.signal);
+    return await fetchBatchWithRetries(lines, opts?.signal, opts?.sourceLanguage);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     const shouldSplit =
@@ -47,6 +47,7 @@ function linkAbortSignal(outer: AbortSignal | undefined, inner: AbortController)
 async function fetchBatchWithRetries(
   lines: string[],
   outerSignal?: AbortSignal,
+  sourceLanguage?: string,
 ): Promise<string[]> {
   const batchStarted = Date.now();
   let attempt = 0;
@@ -66,7 +67,7 @@ async function fetchBatchWithRetries(
       res = await fetch("/api/translate-srt-batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lines }),
+        body: JSON.stringify({ lines, sourceLanguage }),
         signal: controller.signal,
       });
     } catch (e) {
