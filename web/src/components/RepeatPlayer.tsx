@@ -19,11 +19,14 @@ import { alignBilingual } from "@/lib/subtitle/alignBilingual";
 import { parseSrt } from "@/lib/subtitle/parseSrt";
 import type { BilingualCue } from "@/lib/subtitle/types";
 import { GenerateTranslationSrtButton } from "@/components/GenerateTranslationSrtButton";
+import {
+  PlayerPlaybackSettings,
+  type PlaybackSettings,
+} from "@/components/PlayerPlaybackSettings";
 import { VideoSubtitleOverlay } from "@/components/VideoSubtitleOverlay";
 import { setLastMediaId } from "@/lib/lastMediaId";
 import { useMediaSession } from "@/lib/useMediaSession";
 
-const SPEEDS = [0.8, 1.0, 1.25] as const;
 const PLAYER_HEIGHT = "calc(100dvh - 4.25rem - env(safe-area-inset-bottom, 0px))";
 
 type Props = {
@@ -40,8 +43,13 @@ export function RepeatPlayer({ mediaId }: Props) {
   const [cues, setCues] = useState<BilingualCue[]>([]);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-  const [lineRepeatMode, setLineRepeatMode] = useState(false);
-  const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(1.0);
+  const [playback, setPlayback] = useState<PlaybackSettings>({
+    speed: 1.0,
+    lineRepeatCount: 0,
+  });
+  const lineRepeatPassRef = useRef(0);
+  const lineRepeatIndexRef = useRef<number | null>(null);
+  const lineEndHandledRef = useRef(false);
   const [noteDraft, setNoteDraft] = useState("");
   const [notedIndices, setNotedIndices] = useState<Set<number>>(new Set());
   const [favoriteIndices, setFavoriteIndices] = useState<Set<number>>(new Set());
@@ -175,6 +183,8 @@ export function RepeatPlayer({ mediaId }: Props) {
       const video = videoRef.current;
       if (!cue || !video) return;
       setSelectedIndex(index);
+      lineRepeatPassRef.current = 0;
+      lineRepeatIndexRef.current = index;
       if (!opts?.keepPlaylist) {
         setFavoritePlaylistActive(false);
         playlistQueueRef.current = [];
@@ -204,12 +214,32 @@ export function RepeatPlayer({ mediaId }: Props) {
     if (active != null) lastActiveIndexRef.current = active;
     setActiveIndex(active);
 
-    if (lineRepeatMode && selectedIndex != null) {
-      const cue = cues[selectedIndex];
-      if (cue && video.currentTime >= cue.endMs / 1000 - 0.05) {
-        video.currentTime = cue.startMs / 1000;
+    const repeatN = playback.lineRepeatCount;
+    if (repeatN > 0 && active != null && !favoritePlaylistActive) {
+      const cue = cues[active];
+      const atEnd = cue && video.currentTime >= cue.endMs / 1000 - 0.05;
+      if (atEnd && cue) {
+        if (!lineEndHandledRef.current) {
+          lineEndHandledRef.current = true;
+          if (lineRepeatIndexRef.current !== active) {
+            lineRepeatIndexRef.current = active;
+            lineRepeatPassRef.current = 0;
+          }
+          lineRepeatPassRef.current += 1;
+          if (lineRepeatPassRef.current < repeatN) {
+            video.currentTime = cue.startMs / 1000;
+          } else {
+            lineRepeatPassRef.current = 0;
+            lineRepeatIndexRef.current = null;
+            const next = active + 1;
+            if (next < cues.length) {
+              playCue(next);
+            }
+          }
+        }
+        return;
       }
-      return;
+      lineEndHandledRef.current = false;
     }
 
     if (favoritePlaylistActive && playlistQueueRef.current.length > 0) {
@@ -227,12 +257,18 @@ export function RepeatPlayer({ mediaId }: Props) {
         }
       }
     }
-  }, [cues, favoritePlaylistActive, findActiveIndex, lineRepeatMode, playCue, selectedIndex]);
+  }, [
+    cues,
+    favoritePlaylistActive,
+    findActiveIndex,
+    playback.lineRepeatCount,
+    playCue,
+  ]);
 
   useEffect(() => {
     const video = videoRef.current;
-    if (video) video.playbackRate = speed;
-  }, [speed, videoUrl]);
+    if (video) video.playbackRate = playback.speed;
+  }, [playback.speed, videoUrl]);
 
   useEffect(() => {
     if (scrollLineIndex == null || !listRef.current) {
@@ -291,7 +327,6 @@ export function RepeatPlayer({ mediaId }: Props) {
   const startFavoritePlaylist = () => {
     const queue = [...favoriteIndices].sort((a, b) => a - b);
     if (queue.length === 0) return;
-    setLineRepeatMode(false);
     setFavoritePlaylistActive(true);
     playlistQueueRef.current = queue;
     playlistStepRef.current = 0;
@@ -361,6 +396,7 @@ export function RepeatPlayer({ mediaId }: Props) {
       <div className="flex shrink-0 items-center justify-between gap-2 pb-2">
           <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">{title}</h1>
           <div className="flex shrink-0 items-center gap-2 text-sm">
+            <PlayerPlaybackSettings value={playback} onChange={setPlayback} />
             <GenerateTranslationSrtButton
               mediaId={mediaId}
               variant="compact"
@@ -405,7 +441,8 @@ export function RepeatPlayer({ mediaId }: Props) {
                 src={videoUrl}
                 playsInline
                 preload="auto"
-                className="aspect-video max-h-[min(42vh,280px)] w-full object-contain"
+                className="aspect-video max-h-[min(42vh,280px)] w-full cursor-pointer object-contain"
+                onClick={() => togglePlayPause()}
                 onTimeUpdate={onTimeUpdate}
                 onError={() => {
                   setVideoPlayError(
@@ -415,6 +452,15 @@ export function RepeatPlayer({ mediaId }: Props) {
                 onLoadedData={() => setVideoPlayError(null)}
               />
             )}
+            {videoUrl && !videoLoading && (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                {!isPlaying && (
+                  <span className="rounded-full bg-black/50 px-3 py-1 text-xs font-medium text-white">
+                    タップで再生
+                  </span>
+                )}
+              </div>
+            )}
             {(loadError || videoPlayError) && (
               <p className="px-2 pb-1 text-[10px] text-red-300">
                 {loadError ?? videoPlayError}
@@ -423,63 +469,9 @@ export function RepeatPlayer({ mediaId }: Props) {
             <VideoSubtitleOverlay cue={overlayCue} />
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => goRelative(-1)}
-              className="rounded-lg border border-zinc-300 px-2.5 py-2 text-xs dark:border-zinc-600"
-            >
-              前
-            </button>
-            <button
-              type="button"
-              onClick={togglePlayPause}
-              className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white"
-            >
-              {isPlaying ? "一時停止" : "再生"}
-            </button>
-            <button
-              type="button"
-              onClick={() => goRelative(1)}
-              className="rounded-lg border border-zinc-300 px-2.5 py-2 text-xs dark:border-zinc-600"
-            >
-              次
-            </button>
-            <button
-              type="button"
-              onClick={() => setLineRepeatMode((v) => !v)}
-              className={`rounded-lg px-2.5 py-2 text-xs ${
-                lineRepeatMode
-                  ? "bg-sky-100 text-sky-800 dark:bg-sky-900"
-                  : "border border-zinc-300 dark:border-zinc-600"
-              }`}
-            >
-              {lineRepeatMode ? "🔁 リピート" : "通常"}
-            </button>
-            <div className="ml-auto flex gap-1">
-              {SPEEDS.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setSpeed(s)}
-                  className={`rounded px-2 py-1 text-xs ${
-                    speed === s ? "bg-sky-600 text-white" : "border border-zinc-300 dark:border-zinc-600"
-                  }`}
-                >
-                  x{s}
-                </button>
-              ))}
-            </div>
-          </div>
-
       </div>
 
       <div className="mt-2 flex shrink-0 flex-wrap gap-2">
-          <ToggleChip
-            active={lineRepeatMode}
-            onClick={() => setLineRepeatMode((v) => !v)}
-            label={lineRepeatMode ? "リピート ON" : "通常再生"}
-          />
           <ToggleChip
             active={showFavoritesOnly}
             onClick={() => setShowFavoritesOnly((v) => !v)}
@@ -528,7 +520,7 @@ export function RepeatPlayer({ mediaId }: Props) {
                     ? "scale-[1.02] border-sky-500 bg-sky-100 shadow-md ring-2 ring-sky-400 dark:border-sky-400 dark:bg-sky-900/70"
                     : selected || memoOpen
                       ? "border-sky-300 bg-sky-50/80 dark:border-sky-700 dark:bg-sky-950/50"
-                      : "border-transparent bg-white opacity-75 dark:bg-zinc-950 dark:opacity-70"
+                      : "border-transparent bg-white dark:bg-zinc-950"
                 }`}
               >
                 <div className="flex gap-0.5">
@@ -542,7 +534,7 @@ export function RepeatPlayer({ mediaId }: Props) {
                 >
                   <div
                     className={`flex items-center gap-2 text-xs ${
-                      speaking ? "font-bold text-sky-700 dark:text-sky-200" : "text-red-600"
+                      speaking ? "font-bold text-sky-800 dark:text-sky-200" : "font-semibold text-red-700 dark:text-red-400"
                     }`}
                   >
                     <span className="font-bold">#{cue.index}</span>
@@ -558,8 +550,8 @@ export function RepeatPlayer({ mediaId }: Props) {
                   <p
                     className={`mt-1 leading-snug ${
                       speaking
-                        ? "text-base font-semibold text-zinc-900 dark:text-white"
-                        : "text-sm font-medium text-zinc-700 dark:text-zinc-300"
+                        ? "text-base font-bold text-zinc-950 dark:text-white"
+                        : "text-sm font-semibold text-zinc-900 dark:text-zinc-100"
                     }`}
                   >
                     {cue.primary}
@@ -568,8 +560,8 @@ export function RepeatPlayer({ mediaId }: Props) {
                     <p
                       className={`mt-1 leading-snug ${
                         speaking
-                          ? "text-sm font-medium text-sky-900/90 dark:text-sky-100"
-                          : "text-sm text-zinc-600 dark:text-zinc-400"
+                          ? "text-sm font-bold text-sky-950 dark:text-sky-50"
+                          : "text-sm font-semibold text-zinc-800 dark:text-zinc-200"
                       }`}
                     >
                       {cue.translation}
