@@ -2,15 +2,17 @@ import { getMediaMeta, updateMedia } from "@/lib/db/clientDb";
 import { getMetaDb, openMetaDb } from "@/lib/db/metaDb";
 import type { TranslationJobRecord } from "@/lib/db/types";
 import { fingerprintPrimarySrt } from "@/lib/translation/fingerprintPrimarySrt";
-import { isTranslationFormatError } from "@/lib/gemini/retryableError";
+import { isTranslationFormatError, sleep } from "@/lib/gemini/retryableError";
 import { isRateLimitError, translationRetryDelayMs } from "@/lib/gemini/retryDelay";
 import { detectSourceLanguage } from "@/lib/translation/detectSourceLanguage";
 import { translateLinesViaApi } from "@/lib/translation/translateBatchClient";
 import { parseSrt } from "@/lib/subtitle/parseSrt";
 import { serializeSrt } from "@/lib/subtitle/serializeSrt";
 
-const BATCH_SIZE = 8;
-const PAUSE_BETWEEN_BATCH_MS = 4000;
+const BATCH_SIZE = 10;
+const PAUSE_BETWEEN_BATCH_MS = 2400;
+/** 成功が続く間、1 回の run で連続処理するバッチ上限（API 混雑時は従来どおり 1 バッチで抜ける） */
+const MAX_BATCHES_PER_RUN = 16;
 /** 進捗（行数）が増えない時間 — 再試行の updatedAt では延長しない */
 const STALE_PROGRESS_MS = 75_000;
 const GLOBAL_RESUME_MS = 8_000;
@@ -340,7 +342,11 @@ function scheduleJobAttempt(
   };
 }
 
-/** 1 回の run で最大 1 バッチ（待機は IndexedDB の nextAttemptAt + 定期 tick） */
+function tabIsHidden(): boolean {
+  return typeof document !== "undefined" && document.visibilityState === "hidden";
+}
+
+/** 失敗時のみ nextAttemptAt で抜ける。成功時は短い間隔で連続バッチ */
 async function runLoop(mediaId: string, primarySrt: string): Promise<void> {
   if (activeLoopToken.has(mediaId)) return;
 
@@ -361,106 +367,136 @@ async function runLoop(mediaId: string, primarySrt: string): Promise<void> {
 
   try {
     await withScreenWakeLock(async () => {
-      if (loopTokenMismatch(mediaId, token)) return;
-
-      const current = await getMetaDb().translationJobs.get(jobId(mediaId));
-      if (!current || current.status !== "running") return;
-      if (current.doneCues >= current.totalCues) {
-        const doneJob: TranslationJobRecord = {
-          ...current,
-          status: "done",
-          errorMessage: undefined,
-          consecutiveFailures: 0,
-          nextAttemptAt: undefined,
-          updatedAt: Date.now(),
-        };
-        await upsertJob(doneJob);
-        emit(mediaId, doneJob);
-        return;
-      }
-
-      const start = current.doneCues;
-      const size = batchSizeForJob(current);
-      const batchEnd = Math.min(start + size, current.totalCues);
+      let batchesThisRun = 0;
       const cues = parseSrt(primarySrt);
-      const batchTexts = cues.slice(start, batchEnd).map((c) => c.text);
 
-      const batchAbort = new AbortController();
-      batchAbortByMedia.set(mediaId, batchAbort);
-
-      try {
-        const translated = await translateLinesViaApi(batchTexts, {
-          signal: batchAbort.signal,
-          sourceLanguage,
-        });
-        batchAbortByMedia.delete(mediaId);
-
+      while (batchesThisRun < MAX_BATCHES_PER_RUN) {
         if (loopTokenMismatch(mediaId, token)) return;
 
-        const lines = [...current.lines];
-        for (let i = 0; i < translated.length; i++) {
-          lines[start + i] = translated[i] ?? "";
-        }
-        const now = Date.now();
-        const hasMore = batchEnd < current.totalCues;
-        const next: TranslationJobRecord = {
-          ...current,
-          lines,
-          doneCues: batchEnd,
-          consecutiveFailures: 0,
-          errorMessage: undefined,
-          lastProgressAt: now,
-          nextAttemptAt: hasMore ? now + PAUSE_BETWEEN_BATCH_MS : undefined,
-          updatedAt: now,
-        };
-        await persistJobProgress(mediaId, primarySrt, next);
-      } catch (e) {
-        batchAbortByMedia.delete(mediaId);
-        if (loopTokenMismatch(mediaId, token)) return;
-
-        const message = e instanceof Error ? e.message : "翻訳に失敗しました";
-        if (/aborted|AbortError|中断されました/i.test(message)) return;
-
-        const latest =
-          (await getMetaDb().translationJobs.get(jobId(mediaId))) ?? current;
-        if (latest.doneCues > current.doneCues) return;
-
-        const failures = (latest.consecutiveFailures ?? 0) + 1;
-
-        if (failures >= SKIP_BATCH_AFTER_FAILURES) {
-          const lines = [...latest.lines];
-          for (let i = 0; i < batchTexts.length; i++) {
-            const idx = start + i;
-            if (!lines[idx]?.trim()) {
-              lines[idx] = `［要修正］${batchTexts[i] ?? ""}`;
-            }
-          }
-          const now = Date.now();
-          const hasMore = batchEnd < latest.totalCues;
-          const skipped: TranslationJobRecord = {
-            ...latest,
-            lines,
-            doneCues: batchEnd,
+        const current = await getMetaDb().translationJobs.get(jobId(mediaId));
+        if (!current || current.status !== "running") return;
+        if (current.doneCues >= current.totalCues) {
+          const doneJob: TranslationJobRecord = {
+            ...current,
+            status: "done",
+            errorMessage: undefined,
             consecutiveFailures: 0,
-            errorMessage: `行${start + 1}付近をスキップして続行（${batchEnd}/${latest.totalCues}）`,
-            lastProgressAt: now,
-            nextAttemptAt: hasMore ? now + PAUSE_BETWEEN_BATCH_MS : undefined,
-            updatedAt: now,
+            nextAttemptAt: undefined,
+            updatedAt: Date.now(),
           };
-          await persistJobProgress(mediaId, primarySrt, skipped);
+          await upsertJob(doneJob);
+          emit(mediaId, doneJob);
           return;
         }
 
-        const formatHint = isTranslationFormatError(message) ? "（JSON形式）" : "";
-        const rateHint = isRateLimitError(message) ? " · API混雑" : "";
-        const waitMs = translationRetryDelayMs(failures, message);
-        const waiting = scheduleJobAttempt(latest, {
-          consecutiveFailures: failures,
-          delayMs: waitMs,
-          errorMessage: `再試行${formatHint}${rateHint} · ${Math.max(1, Math.round(waitMs / 1000))}秒後（${latest.doneCues}/${latest.totalCues}） — ${shortError(message)}`,
-        });
-        await upsertJob(waiting);
-        emit(mediaId, waiting);
+        const start = current.doneCues;
+        const size = batchSizeForJob(current);
+        const batchEnd = Math.min(start + size, current.totalCues);
+        const batchTexts = cues.slice(start, batchEnd).map((c) => c.text);
+
+        const batchAbort = new AbortController();
+        batchAbortByMedia.set(mediaId, batchAbort);
+        batchesThisRun += 1;
+
+        try {
+          const translated = await translateLinesViaApi(batchTexts, {
+            signal: batchAbort.signal,
+            sourceLanguage,
+          });
+          batchAbortByMedia.delete(mediaId);
+
+          if (loopTokenMismatch(mediaId, token)) return;
+
+          const lines = [...current.lines];
+          for (let i = 0; i < translated.length; i++) {
+            lines[start + i] = translated[i] ?? "";
+          }
+          const now = Date.now();
+          const hasMore = batchEnd < current.totalCues;
+          const next: TranslationJobRecord = {
+            ...current,
+            lines,
+            doneCues: batchEnd,
+            consecutiveFailures: 0,
+            errorMessage: undefined,
+            lastProgressAt: now,
+            nextAttemptAt: undefined,
+            updatedAt: now,
+          };
+          await persistJobProgress(mediaId, primarySrt, next);
+
+          if (!hasMore) return;
+
+          if (tabIsHidden() || batchesThisRun >= MAX_BATCHES_PER_RUN) {
+            await upsertJob({
+              ...next,
+              nextAttemptAt: Date.now(),
+              updatedAt: Date.now(),
+            });
+            emit(mediaId, { ...next, nextAttemptAt: Date.now() });
+            return;
+          }
+
+          await sleep(PAUSE_BETWEEN_BATCH_MS);
+        } catch (e) {
+          batchAbortByMedia.delete(mediaId);
+          if (loopTokenMismatch(mediaId, token)) return;
+
+          const message = e instanceof Error ? e.message : "翻訳に失敗しました";
+          if (/aborted|AbortError|中断されました/i.test(message)) return;
+
+          const latest =
+            (await getMetaDb().translationJobs.get(jobId(mediaId))) ?? current;
+          if (latest.doneCues > current.doneCues) return;
+
+          const failures = (latest.consecutiveFailures ?? 0) + 1;
+
+          if (failures >= SKIP_BATCH_AFTER_FAILURES) {
+            const lines = [...latest.lines];
+            for (let i = 0; i < batchTexts.length; i++) {
+              const idx = start + i;
+              if (!lines[idx]?.trim()) {
+                lines[idx] = `［要修正］${batchTexts[i] ?? ""}`;
+              }
+            }
+            const now = Date.now();
+            const hasMore = batchEnd < latest.totalCues;
+            const skipped: TranslationJobRecord = {
+              ...latest,
+              lines,
+              doneCues: batchEnd,
+              consecutiveFailures: 0,
+              errorMessage: `行${start + 1}付近をスキップして続行（${batchEnd}/${latest.totalCues}）`,
+              lastProgressAt: now,
+              nextAttemptAt: hasMore ? Date.now() : undefined,
+              updatedAt: now,
+            };
+            await persistJobProgress(mediaId, primarySrt, skipped);
+            if (hasMore && !tabIsHidden() && batchesThisRun < MAX_BATCHES_PER_RUN) {
+              await sleep(PAUSE_BETWEEN_BATCH_MS);
+              continue;
+            }
+            return;
+          }
+
+          const formatHint = isTranslationFormatError(message) ? "（JSON形式）" : "";
+          const rateHint = isRateLimitError(message) ? " · API混雑" : "";
+          const waitMs = translationRetryDelayMs(failures, message);
+          const waiting = scheduleJobAttempt(latest, {
+            consecutiveFailures: failures,
+            delayMs: waitMs,
+            errorMessage: `再試行${formatHint}${rateHint} · ${Math.max(1, Math.round(waitMs / 1000))}秒後（${latest.doneCues}/${latest.totalCues}） — ${shortError(message)}`,
+          });
+          await upsertJob(waiting);
+          emit(mediaId, waiting);
+          return;
+        }
+      }
+
+      const tail = await getMetaDb().translationJobs.get(jobId(mediaId));
+      if (tail && tail.status === "running" && tail.doneCues < tail.totalCues) {
+        await upsertJob({ ...tail, nextAttemptAt: Date.now(), updatedAt: Date.now() });
+        emit(mediaId, { ...tail, nextAttemptAt: Date.now() });
       }
     });
   } finally {
