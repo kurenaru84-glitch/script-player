@@ -1,4 +1,5 @@
 import { geminiGenerateTextWithFallback } from "./generateContentWithFallback";
+import { grammarGeminiModelChain } from "./modelChain";
 import { parseTranslationArray } from "./parseTranslationArray";
 
 export type GrammarLineInput = {
@@ -6,7 +7,11 @@ export type GrammarLineInput = {
   translation?: string;
 };
 
-function buildPrompt(lines: GrammarLineInput[], source: string, strict: boolean): string {
+function buildBatchPrompt(
+  lines: GrammarLineInput[],
+  source: string,
+  strict: boolean,
+): string {
   const payload = lines.map((l) => ({
     line: l.primary,
     translation: l.translation?.trim() || undefined,
@@ -19,13 +24,36 @@ function buildPrompt(lines: GrammarLineInput[], source: string, strict: boolean)
 
 ルール:
 - 入力と同じ件数・同じ順序（${lines.length} 件）
-- 各要素は 2〜5 文程度。重要な構文・助動詞・語順・口語表現に触れる
-- 丸写しの全文和訳は不要（translation があれば参考にしてよい）
-- タイムコードや番号は出力に含めない
+- 各要素は 2〜4 文。構文・助動詞・語順・口語に触れる
+- 丸写しの全文和訳は不要
 - 出力は JSON 配列のみ（文字列の配列）
 
 入力:
 ${JSON.stringify(payload)}${strictNote}`;
+}
+
+function buildSingleLinePrompt(line: GrammarLineInput, source: string): string {
+  const tr = line.translation?.trim();
+  return `${source}字幕の1行について、日本語で文法解説を2〜4文。Markdown・箇条書き・JSON禁止。和訳の繰り返しは不要。
+
+${source}: ${line.primary.trim()}${tr ? `\n参考訳: ${tr}` : ""}`;
+}
+
+/** 1セリフ向け：プレーンテキスト・軽量モデル・短い max tokens */
+export async function explainOneGrammarLine(
+  line: GrammarLineInput,
+  opts?: { sourceLanguage?: string },
+): Promise<string> {
+  const source = opts?.sourceLanguage ?? "英語";
+  const prompt = buildSingleLinePrompt(line, source);
+  const raw = await geminiGenerateTextWithFallback(prompt, {
+    models: grammarGeminiModelChain(),
+    maxAttemptsPerModel: 2,
+    maxOutputTokens: 640,
+  });
+  const text = raw.replace(/^```[\w]*\n?|\n?```$/g, "").trim();
+  if (!text) throw new Error("空の解説が返りました");
+  return text;
 }
 
 export async function explainGrammarLines(
@@ -33,14 +61,19 @@ export async function explainGrammarLines(
   opts?: { sourceLanguage?: string },
 ): Promise<string[]> {
   if (lines.length === 0) return [];
-  const source = opts?.sourceLanguage ?? "英語";
+  if (lines.length === 1) {
+    return [await explainOneGrammarLine(lines[0]!, opts)];
+  }
 
+  const source = opts?.sourceLanguage ?? "英語";
   let lastError: Error | undefined;
-  for (let attempt = 0; attempt < 4; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const prompt = buildPrompt(lines, source, attempt > 0);
+      const prompt = buildBatchPrompt(lines, source, attempt > 0);
       const raw = await geminiGenerateTextWithFallback(prompt, {
-        maxAttemptsPerModel: attempt > 0 ? 3 : 5,
+        models: grammarGeminiModelChain(),
+        maxAttemptsPerModel: attempt > 0 ? 2 : 3,
+        maxOutputTokens: 4096,
       });
       return parseTranslationArray(raw, lines.length);
     } catch (e) {

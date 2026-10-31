@@ -20,7 +20,12 @@ type GeminiResponse = {
   error?: { message?: string; code?: number };
 };
 
-async function generateOnce(model: string, prompt: string, apiKey: string): Promise<string> {
+async function generateOnce(
+  model: string,
+  prompt: string,
+  apiKey: string,
+  gen?: { maxOutputTokens?: number },
+): Promise<string> {
   const url = `${API_BASE}/${model}:generateContent`;
   const res = await fetch(url, {
     method: "POST",
@@ -28,7 +33,7 @@ async function generateOnce(model: string, prompt: string, apiKey: string): Prom
       "Content-Type": "application/json",
       "x-goog-api-key": apiKey,
     },
-    body: JSON.stringify(buildGenerateContentRequest(model, prompt)),
+    body: JSON.stringify(buildGenerateContentRequest(model, prompt, gen)),
   });
   const rawBody = await res.text();
   let data: GeminiResponse;
@@ -55,6 +60,8 @@ async function generateOnce(model: string, prompt: string, apiKey: string): Prom
 
 export type GeminiGenerateOptions = {
   maxAttemptsPerModel?: number;
+  models?: string[];
+  maxOutputTokens?: number;
 };
 
 /** 429 / high demand 時は待機→再試行。モデル廃止時は次モデルへ */
@@ -63,14 +70,17 @@ export async function geminiGenerateTextWithFallback(
   opts?: GeminiGenerateOptions,
 ): Promise<string> {
   const apiKey = getGeminiApiKey();
-  const models = geminiModelChain();
+  const models = opts?.models?.length ? opts.models : geminiModelChain();
   const maxAttempts = opts?.maxAttemptsPerModel ?? 3;
+  const gen = opts?.maxOutputTokens
+    ? { maxOutputTokens: opts.maxOutputTokens }
+    : undefined;
   let lastError: Error | undefined;
 
   for (const model of models) {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        return await generateOnce(model, prompt, apiKey);
+        return await generateOnce(model, prompt, apiKey, gen);
       } catch (e) {
         const err = e instanceof Error ? e : new Error(String(e));
         lastError = err;

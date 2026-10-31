@@ -40,3 +40,18 @@ export function geminiModelChain(): string[] {
   const chain = [primary, ...fromEnv, ...DEFAULT_CHAIN];
   return [...new Set(chain)].filter((m) => !DEPRECATED_MODELS.has(m));
 }
+
+/** 1セリフ文法解説向け（短答・低レイテンシ） */
+const GRAMMAR_DEFAULT_CHAIN = [
+  "gemini-3.1-flash-lite",
+  "gemini-3-flash-preview",
+  "gemini-3.6-flash",
+] as const;
+
+export function grammarGeminiModelChain(): string[] {
+  const primary = normalizeGeminiModel(
+    process.env.GEMINI_GRAMMAR_MODEL?.trim() || GRAMMAR_DEFAULT_CHAIN[0],
+  );
+  const chain = [primary, ...GRAMMAR_DEFAULT_CHAIN];
+  return [...new Set(chain)].filter((m) => !DEPRECATED_MODELS.has(m));
+}

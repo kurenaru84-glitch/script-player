@@ -1,9 +1,13 @@
 /** Gemini 3 は temperature 非推奨。thinkingConfig は API/キー差で落ちるため送らない */
-export function buildGenerateContentRequest(_model: string, prompt: string): object {
+export function buildGenerateContentRequest(
+  _model: string,
+  prompt: string,
+  opts?: { maxOutputTokens?: number },
+): object {
   return {
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: {
-      maxOutputTokens: 8192,
+      maxOutputTokens: opts?.maxOutputTokens ?? 8192,
     },
   };
 }
