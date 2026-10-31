@@ -14,7 +14,7 @@ type Props = {
   grammarDraft: string;
   onNoteChange: (value: string) => void;
   onGrammarChange: (value: string) => void;
-  onSave: () => void;
+  onSave: (overrides?: { body?: string; grammarBody?: string }) => void | Promise<void>;
   onClose: () => void;
 };
 
@@ -33,11 +33,13 @@ export function CueNoteModal({
 }: Props) {
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
+  const [savedHint, setSavedHint] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) {
       setGenError(null);
       setGenerating(false);
+      setSavedHint(null);
     }
   }, [open]);
 
@@ -57,7 +59,18 @@ export function CueNoteModal({
         { sourceLanguage },
       );
       if (!text?.trim()) throw new Error("空の解説が返りました");
-      onGrammarChange(text.trim());
+      const grammar = text.trim();
+      onGrammarChange(grammar);
+      try {
+        await onSave({ body: noteDraft, grammarBody: grammar });
+        setSavedHint("文法解説を保存しました");
+      } catch (saveErr) {
+        setGenError(
+          saveErr instanceof Error
+            ? `生成は成功しましたが保存に失敗: ${saveErr.message}`
+            : "保存に失敗しました",
+        );
+      }
     } catch (e) {
       setGenError(e instanceof Error ? e.message : "生成に失敗しました");
     } finally {
@@ -130,6 +143,11 @@ export function CueNoteModal({
             {genError && (
               <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{genError}</p>
             )}
+            {savedHint && (
+              <p className="mt-1 text-[11px] text-emerald-700 dark:text-emerald-300">
+                {savedHint}
+              </p>
+            )}
             <textarea
               value={grammarDraft}
               onChange={(e) => onGrammarChange(e.target.value)}
@@ -155,7 +173,7 @@ export function CueNoteModal({
         <div className="shrink-0 border-t border-zinc-200 px-4 py-3 dark:border-zinc-800">
           <button
             type="button"
-            onClick={onSave}
+            onClick={() => void onSave({ body: noteDraft, grammarBody: grammarDraft })}
             className="w-full rounded-xl bg-emerald-600 py-2.5 text-sm font-semibold text-white"
           >
             保存

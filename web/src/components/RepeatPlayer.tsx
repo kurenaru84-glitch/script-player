@@ -411,7 +411,10 @@ export function RepeatPlayer({ mediaId }: Props) {
     playCue(queue[0]!, { keepPlaylist: true });
   };
 
-  const saveCurrentNote = async () => {
+  const saveCurrentNote = async (overrides?: {
+    body?: string;
+    grammarBody?: string;
+  }) => {
     if (memoOpenIndex == null) return;
     const cue = cues[memoOpenIndex];
     if (!cue) return;
@@ -420,8 +423,8 @@ export function RepeatPlayer({ mediaId }: Props) {
       cueIndex: memoOpenIndex,
       primaryLine: cue.primary,
       translationLine: cue.translation,
-      body: noteDraft,
-      grammarBody: grammarDraft,
+      body: overrides?.body ?? noteDraft,
+      grammarBody: overrides?.grammarBody ?? grammarDraft,
     });
     const flags = await cueNoteFlags(mediaId);
     setMemoIndices(flags.memo);
@@ -777,7 +780,7 @@ export function RepeatPlayer({ mediaId }: Props) {
           grammarDraft={grammarDraft}
           onNoteChange={setNoteDraft}
           onGrammarChange={setGrammarDraft}
-          onSave={() => void saveCurrentNote()}
+          onSave={(overrides) => void saveCurrentNote(overrides)}
           onClose={() => setMemoOpenIndex(null)}
         />
       )}
