@@ -201,16 +201,11 @@ export function ReadlangSelectionBar({
     if (!pending) return;
     const cue = getCue(pending.cueIndex);
     if (!cue) return;
-    const tr = translation.trim();
-    if (!tr) {
-      setError("先に翻訳するか、意味を入力してください");
-      return;
-    }
     await addSavedWord({
       mediaId,
       cueIndex: pending.cueIndex,
       text: pending.text,
-      translation: tr,
+      translation: translation.trim(),
       contextPrimary: cue.primary,
       contextTranslation: cue.translation,
     });
@@ -257,18 +252,18 @@ export function ReadlangSelectionBar({
         <div className="mt-2 flex flex-wrap gap-2">
           <button
             type="button"
-            disabled={loading}
-            onClick={() => void runTranslate()}
-            className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
-          >
-            {loading ? "翻訳中…" : "再翻訳"}
-          </button>
-          <button
-            type="button"
             onClick={() => void runSave()}
             className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white"
           >
             リストに追加
+          </button>
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => void runTranslate()}
+            className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+          >
+            {loading ? "翻訳中…" : translation ? "再翻訳" : "翻訳"}
           </button>
           <button
             type="button"

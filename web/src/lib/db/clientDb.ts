@@ -121,7 +121,8 @@ export async function addSavedWord(input: {
   mediaId: string;
   cueIndex: number;
   text: string;
-  translation: string;
+  /** 空なら Words で後から入力・AI翻訳 */
+  translation?: string;
   contextPrimary: string;
   contextTranslation: string;
 }): Promise<SavedWord> {

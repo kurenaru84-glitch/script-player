@@ -11,6 +11,7 @@ import {
   type SavedWord,
   type VocabNote,
 } from "@/lib/db/clientDb";
+import { translatePhraseViaApi } from "@/lib/readlang/translatePhraseClient";
 
 type Tab = "words" | "lineNotes";
 
@@ -23,6 +24,7 @@ export default function VocabularyPage() {
   const [query, setQuery] = useState("");
   const [starredOnly, setStarredOnly] = useState(false);
   const [mediaFilter, setMediaFilter] = useState<string>("all");
+  const [translatingId, setTranslatingId] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     const [w, n, media] = await Promise.all([
@@ -146,6 +148,7 @@ export default function VocabularyPage() {
                       <input
                         className="mt-1 w-full rounded-lg border border-zinc-100 bg-zinc-50 px-2 py-1 text-sm dark:border-zinc-800 dark:bg-zinc-900"
                         value={word.translation}
+                        placeholder="意味（空でも保存可 → あとで入力）"
                         onChange={(e) =>
                           setWords((prev) =>
                             prev.map((w) =>
@@ -159,6 +162,25 @@ export default function VocabularyPage() {
                           }).then(reload)
                         }
                       />
+                      {!word.translation.trim() && (
+                        <button
+                          type="button"
+                          disabled={translatingId === word.id}
+                          className="mt-1 text-xs font-medium text-sky-600 disabled:opacity-50"
+                          onClick={() => {
+                            setTranslatingId(word.id);
+                            void translatePhraseViaApi(word.text, {
+                              context: `${word.contextPrimary}\n${word.contextTranslation}`,
+                            })
+                              .then((tr) =>
+                                updateSavedWord(word.id, { translation: tr }).then(reload),
+                              )
+                              .finally(() => setTranslatingId(null));
+                          }}
+                        >
+                          {translatingId === word.id ? "AI翻訳中…" : "AI で翻訳"}
+                        </button>
+                      )}
                     </div>
                     <button
                       type="button"

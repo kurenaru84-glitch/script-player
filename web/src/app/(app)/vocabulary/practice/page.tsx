@@ -74,7 +74,9 @@ export default function VocabularyPracticePage() {
           {revealed ? "意味" : "語句（タップで表示）"}
         </p>
         <p className="mt-3 text-2xl font-bold leading-snug">
-          {revealed ? card!.translation : card!.text}
+          {revealed
+            ? card!.translation.trim() || "（未翻訳 — Words で AI翻訳）"
+            : card!.text}
         </p>
         {revealed && (
           <>
