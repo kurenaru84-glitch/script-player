@@ -19,8 +19,8 @@ import { loadBilingualSubtitles } from "@/lib/subtitle/loadBilingualSubtitles";
 import { parseSrt } from "@/lib/subtitle/parseSrt";
 import type { BilingualCue } from "@/lib/subtitle/types";
 import { GenerateTranslationSrtButton } from "@/components/GenerateTranslationSrtButton";
-import { GenerateGrammarButton } from "@/components/GenerateGrammarButton";
 import { CueNoteModal } from "@/components/CueNoteModal";
+import { detectSourceLanguage } from "@/lib/translation/detectSourceLanguage";
 import {
   PlayerPlaybackSettings,
   type PlaybackSettings,
@@ -426,11 +426,10 @@ export function RepeatPlayer({ mediaId }: Props) {
     setGrammarIndices(flags.grammar);
   };
 
-  const refreshNoteFlags = useCallback(async () => {
-    const flags = await cueNoteFlags(mediaId);
-    setMemoIndices(flags.memo);
-    setGrammarIndices(flags.grammar);
-  }, [mediaId]);
+  const grammarSourceLanguage = useMemo(
+    () => detectSourceLanguage(cues.slice(0, 40).map((c) => c.primary)),
+    [cues],
+  );
 
   const copyCueLines = async (index: number) => {
     const cue = cues[index];
@@ -486,11 +485,6 @@ export function RepeatPlayer({ mediaId }: Props) {
               mediaId={mediaId}
               variant="compact"
               onComplete={() => void reloadMetaOnly({ showLoading: false })}
-            />
-            <GenerateGrammarButton
-              mediaId={mediaId}
-              variant="compact"
-              onComplete={() => void refreshNoteFlags()}
             />
             <Link
               href={`/dictation/${mediaId}?cue=${dictationCueParam}`}
@@ -741,6 +735,7 @@ export function RepeatPlayer({ mediaId }: Props) {
           cueIndex={memoOpenIndex}
           primary={cues[memoOpenIndex]!.primary}
           translation={cues[memoOpenIndex]!.translation}
+          sourceLanguage={grammarSourceLanguage}
           noteDraft={noteDraft}
           grammarDraft={grammarDraft}
           onNoteChange={setNoteDraft}

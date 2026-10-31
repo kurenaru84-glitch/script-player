@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { explainGrammarViaApi } from "@/lib/grammar/grammarBatchClient";
 
 type Props = {
   open: boolean;
   cueIndex: number;
   primary: string;
   translation?: string;
+  sourceLanguage?: string;
   noteDraft: string;
   grammarDraft: string;
   onNoteChange: (value: string) => void;
@@ -27,7 +29,42 @@ export function CueNoteModal({
   onGrammarChange,
   onSave,
   onClose,
+  sourceLanguage,
 }: Props) {
+  const [generating, setGenerating] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      setGenError(null);
+      setGenerating(false);
+    }
+  }, [open]);
+
+  const runGrammarAi = async () => {
+    if (generating) return;
+    if (
+      grammarDraft.trim() &&
+      !window.confirm("既存の文法解説を AI の結果で上書きしますか？")
+    ) {
+      return;
+    }
+    setGenError(null);
+    setGenerating(true);
+    try {
+      const [text] = await explainGrammarViaApi(
+        [{ primary, translation }],
+        { sourceLanguage },
+      );
+      if (!text?.trim()) throw new Error("空の解説が返りました");
+      onGrammarChange(text.trim());
+    } catch (e) {
+      setGenError(e instanceof Error ? e.message : "生成に失敗しました");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   useEffect(() => {
     if (!open) return;
     const prev = document.body.style.overflow;
@@ -77,14 +114,27 @@ export function CueNoteModal({
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-3">
           <label className="block">
-            <span className="text-xs font-semibold text-amber-800 dark:text-amber-300">
-              文法解説（AI 生成・編集可）
-            </span>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-amber-800 dark:text-amber-300">
+                文法解説（編集可）
+              </span>
+              <button
+                type="button"
+                disabled={generating}
+                onClick={() => void runGrammarAi()}
+                className="rounded-lg bg-amber-600 px-2.5 py-1 text-[11px] font-semibold text-white disabled:opacity-60"
+              >
+                {generating ? "生成中…" : "このセリフを AI 解説"}
+              </button>
+            </div>
+            {genError && (
+              <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{genError}</p>
+            )}
             <textarea
               value={grammarDraft}
               onChange={(e) => onGrammarChange(e.target.value)}
               rows={8}
-              placeholder="「AI文法」で一括生成、またはここに直接入力…"
+              placeholder="「このセリフを AI 解説」または直接入力…"
               className="mt-1.5 w-full min-h-[10rem] resize-y rounded-xl border border-amber-200/90 bg-amber-50/40 p-3 text-[15px] leading-relaxed text-zinc-900 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-zinc-100"
             />
           </label>
