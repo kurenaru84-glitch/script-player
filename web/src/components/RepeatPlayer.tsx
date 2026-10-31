@@ -33,6 +33,7 @@ import {
 } from "@/lib/useBackgroundPlayback";
 import { useMediaSession } from "@/lib/useMediaSession";
 import { shouldHandleLineRepeatEnd } from "@/lib/subtitle/lineRepeatAtTime";
+import { ReadlangSelectionBar } from "@/components/readlang/ReadlangSelectionBar";
 
 const PLAYER_HEIGHT = "calc(100dvh - 4.25rem - env(safe-area-inset-bottom, 0px))";
 /** 字幕終端付近（ms）。timeupdate は疎いので余裕を取る */
@@ -47,6 +48,7 @@ export function RepeatPlayer({ mediaId }: Props) {
   const initialCue = Number.parseInt(searchParams.get("cue") ?? "", 10);
   const videoRef = useRef<HTMLVideoElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const readlangRootRef = useRef<HTMLDivElement>(null);
   const [title, setTitle] = useState("");
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [cues, setCues] = useState<BilingualCue[]>([]);
@@ -431,6 +433,19 @@ export function RepeatPlayer({ mediaId }: Props) {
     [cues],
   );
 
+  const getReadlangCue = useCallback(
+    (index: number) => {
+      const c = cues[index];
+      if (!c) return undefined;
+      return {
+        cueIndex: index,
+        primary: c.primary,
+        translation: c.translation ?? "",
+      };
+    },
+    [cues],
+  );
+
   const copyCueLines = async (index: number) => {
     const cue = cues[index];
     if (!cue) return;
@@ -474,6 +489,7 @@ export function RepeatPlayer({ mediaId }: Props) {
 
   return (
     <div
+      ref={readlangRootRef}
       className="relative flex flex-col"
       style={{ height: PLAYER_HEIGHT, maxHeight: PLAYER_HEIGHT }}
     >
@@ -504,7 +520,13 @@ export function RepeatPlayer({ mediaId }: Props) {
             <Link href="/my-list" className="shrink-0 text-sky-600">
               一覧
             </Link>
+            <Link href="/vocabulary" className="shrink-0 text-sky-600">
+              Words
+            </Link>
           </div>
+          <p className="text-[10px] text-zinc-500">
+            字幕を選択 → 翻訳 → 単語リスト（Readlang 風）
+          </p>
       </div>
 
       <div className="sticky top-0 z-30 shrink-0 space-y-2 rounded-xl border border-zinc-200 bg-white/95 p-2 shadow-sm backdrop-blur dark:border-zinc-700 dark:bg-zinc-950/95">
@@ -642,19 +664,27 @@ export function RepeatPlayer({ mediaId }: Props) {
                 <button
                   type="button"
                   onClick={() => playCue(index)}
-                  className="min-w-0 flex-1 px-3 py-3 text-left active:scale-[0.99]"
+                  className="flex w-11 shrink-0 flex-col items-center justify-start gap-1 py-3 text-xs active:scale-[0.98]"
+                  aria-label={`行 ${cue.index} を再生`}
                 >
-                  <div
-                    className={`flex items-center gap-2 text-xs ${
-                      speaking ? "font-bold text-sky-800 dark:text-sky-200" : "font-semibold text-red-700 dark:text-red-400"
+                  <span
+                    className={`font-bold ${
+                      speaking ? "text-sky-700 dark:text-sky-300" : "text-red-700 dark:text-red-400"
                     }`}
                   >
-                    <span className="font-bold">#{cue.index}</span>
-                    {speaking && (
-                      <span className="rounded-full bg-sky-600 px-2 py-0.5 text-[10px] text-white">
-                        再生中
-                      </span>
-                    )}
+                    #{cue.index}
+                  </span>
+                  {speaking && (
+                    <span className="rounded-full bg-sky-600 px-1.5 py-0.5 text-[9px] text-white">
+                      ▶
+                    </span>
+                  )}
+                </button>
+                <div
+                  className="readlang-selectable min-w-0 flex-1 px-1 py-3"
+                  data-cue-index={String(index)}
+                >
+                  <div className="flex flex-wrap items-center gap-1 text-[10px]">
                     {hasGrammar && (
                       <span className="rounded bg-amber-100 px-1.5 text-amber-900 dark:bg-amber-900/50 dark:text-amber-100">
                         文法
@@ -667,7 +697,7 @@ export function RepeatPlayer({ mediaId }: Props) {
                     )}
                   </div>
                   <p
-                    className={`mt-1 leading-snug ${
+                    className={`mt-0.5 leading-snug ${
                       speaking
                         ? "text-base font-bold text-zinc-950 dark:text-white"
                         : "text-sm font-semibold text-zinc-900 dark:text-zinc-100"
@@ -686,7 +716,7 @@ export function RepeatPlayer({ mediaId }: Props) {
                       {cue.translation}
                     </p>
                   )}
-                </button>
+                </div>
                 <button
                   type="button"
                   aria-label="セリフをコピー"
@@ -728,6 +758,13 @@ export function RepeatPlayer({ mediaId }: Props) {
           })}
         </div>
       </div>
+
+      <ReadlangSelectionBar
+        mediaId={mediaId}
+        sourceLanguage={grammarSourceLanguage}
+        rootRef={readlangRootRef}
+        getCue={getReadlangCue}
+      />
 
       {memoOpenIndex != null && cues[memoOpenIndex] && (
         <CueNoteModal

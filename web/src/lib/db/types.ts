@@ -44,6 +44,22 @@ export type FavoriteRecord = {
   cueIndex: number;
 };
 
+/** Readlang 風：選択した語句＋文脈 */
+export type SavedWord = {
+  id: string;
+  mediaId: string;
+  cueIndex: number;
+  /** 選択した語句・フレーズ */
+  text: string;
+  /** 日本語の意味（AI または手入力） */
+  translation: string;
+  contextPrimary: string;
+  contextTranslation: string;
+  starred: boolean;
+  createdAt: number;
+  updatedAt: number;
+};
+
 /** AI 翻訳 SRT の途中経過（再開・バックグラウンド用） */
 export type TranslationJobRecord = {
   id: string;

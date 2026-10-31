@@ -4,6 +4,7 @@ import type {
   GrammarJobRecord,
   MediaMeta,
   TranslationJobRecord,
+  SavedWord,
   VocabNote,
 } from "@/lib/db/types";
 
@@ -14,6 +15,7 @@ class ScriptPlayerMetaDb extends Dexie {
   favorites!: EntityTable<FavoriteRecord, "id">;
   translationJobs!: EntityTable<TranslationJobRecord, "id">;
   grammarJobs!: EntityTable<GrammarJobRecord, "id">;
+  savedWords!: EntityTable<SavedWord, "id">;
 
   constructor() {
     super("scriptPlayerMeta");
@@ -34,6 +36,14 @@ class ScriptPlayerMetaDb extends Dexie {
       favorites: "id, mediaId, cueIndex",
       translationJobs: "id, mediaId, status, updatedAt",
       grammarJobs: "id, mediaId, status, updatedAt",
+    });
+    this.version(4).stores({
+      mediaMeta: "id, createdAt, title",
+      notes: "id, mediaId, updatedAt",
+      favorites: "id, mediaId, cueIndex",
+      translationJobs: "id, mediaId, status, updatedAt",
+      grammarJobs: "id, mediaId, status, updatedAt",
+      savedWords: "id, mediaId, cueIndex, starred, createdAt, updatedAt",
     });
   }
 }

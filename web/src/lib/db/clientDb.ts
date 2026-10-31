@@ -1,8 +1,8 @@
 import { getMetaDb, openMetaDb } from "@/lib/db/metaDb";
 import { migrateLegacyMetaIfNeeded } from "@/lib/db/legacyMigrate";
 
-export type { FavoriteRecord, MediaMeta, VocabNote } from "@/lib/db/types";
-import type { MediaMeta, VocabNote } from "@/lib/db/types";
+export type { FavoriteRecord, MediaMeta, SavedWord, VocabNote } from "@/lib/db/types";
+import type { MediaMeta, SavedWord, VocabNote } from "@/lib/db/types";
 
 export type MediaRecord = MediaMeta & {
   videoBlob?: Blob;
@@ -114,6 +114,77 @@ export async function deleteMedia(id: string): Promise<void> {
   await database.notes.where("mediaId").equals(id).delete();
   await database.favorites.where("mediaId").equals(id).delete();
   await database.grammarJobs.where("mediaId").equals(id).delete();
+  await database.savedWords.where("mediaId").equals(id).delete();
+}
+
+export async function addSavedWord(input: {
+  mediaId: string;
+  cueIndex: number;
+  text: string;
+  translation: string;
+  contextPrimary: string;
+  contextTranslation: string;
+}): Promise<SavedWord> {
+  await openMetaDb();
+  const now = Date.now();
+  const row: SavedWord = {
+    id: crypto.randomUUID(),
+    mediaId: input.mediaId,
+    cueIndex: input.cueIndex,
+    text: input.text.trim(),
+    translation: input.translation.trim(),
+    contextPrimary: input.contextPrimary,
+    contextTranslation: input.contextTranslation,
+    starred: false,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await getMetaDb().savedWords.put(row);
+  return row;
+}
+
+export async function listSavedWords(opts?: {
+  mediaId?: string;
+  starredOnly?: boolean;
+}): Promise<SavedWord[]> {
+  await prepareLocalAppStorage();
+  let rows = await getMetaDb().savedWords.orderBy("createdAt").reverse().toArray();
+  if (opts?.mediaId) rows = rows.filter((r) => r.mediaId === opts.mediaId);
+  if (opts?.starredOnly) rows = rows.filter((r) => r.starred);
+  return rows;
+}
+
+export async function updateSavedWord(
+  id: string,
+  patch: Partial<Pick<SavedWord, "translation" | "starred" | "text">>,
+): Promise<void> {
+  await openMetaDb();
+  const existing = await getMetaDb().savedWords.get(id);
+  if (!existing) return;
+  await getMetaDb().savedWords.put({
+    ...existing,
+    ...patch,
+    updatedAt: Date.now(),
+  });
+}
+
+export async function deleteSavedWord(id: string): Promise<void> {
+  await openMetaDb();
+  await getMetaDb().savedWords.delete(id);
+}
+
+export async function savedWordCountByMedia(): Promise<
+  Array<{ mediaId: string; count: number }>
+> {
+  await openMetaDb();
+  const rows = await getMetaDb().savedWords.toArray();
+  const map = new Map<string, number>();
+  for (const r of rows) {
+    map.set(r.mediaId, (map.get(r.mediaId) ?? 0) + 1);
+  }
+  return [...map.entries()]
+    .map(([mediaId, count]) => ({ mediaId, count }))
+    .sort((a, b) => b.count - a.count);
 }
 
 export async function saveNote(input: {
