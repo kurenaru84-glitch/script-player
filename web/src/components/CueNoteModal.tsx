@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { explainGrammarViaApi } from "@/lib/grammar/grammarBatchClient";
+import { ReadlangSelectionBar } from "@/components/readlang/ReadlangSelectionBar";
 
 type Props = {
   open: boolean;
+  mediaId: string;
   cueIndex: number;
   primary: string;
   translation?: string;
@@ -20,6 +22,7 @@ type Props = {
 
 export function CueNoteModal({
   open,
+  mediaId,
   cueIndex,
   primary,
   translation,
@@ -31,6 +34,7 @@ export function CueNoteModal({
   onClose,
   sourceLanguage,
 }: Props) {
+  const readlangRootRef = useRef<HTMLDivElement>(null);
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
   const [savedHint, setSavedHint] = useState<string | null>(null);
@@ -42,6 +46,18 @@ export function CueNoteModal({
       setSavedHint(null);
     }
   }, [open]);
+
+  const getReadlangCue = useCallback(
+    (index: number) => {
+      if (index !== cueIndex) return undefined;
+      return {
+        cueIndex,
+        primary,
+        translation: translation ?? "",
+      };
+    },
+    [cueIndex, primary, translation],
+  );
 
   const runGrammarAi = async () => {
     if (generating) return;
@@ -97,14 +113,24 @@ export function CueNoteModal({
         className="fixed inset-0 z-[210] bg-black/40"
         onClick={onClose}
       />
+      <ReadlangSelectionBar
+        mediaId={mediaId}
+        sourceLanguage={sourceLanguage ?? "英語"}
+        rootRef={readlangRootRef}
+        getCue={getReadlangCue}
+      />
       <div
+        ref={readlangRootRef}
         role="dialog"
         aria-label={`メモ 行 ${cueIndex + 1}`}
         className="fixed inset-x-2 top-[max(0.75rem,env(safe-area-inset-top))] z-[211] flex max-h-[calc(100dvh-1rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] flex-col rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-950 sm:inset-x-auto sm:left-1/2 sm:w-full sm:max-w-lg sm:-translate-x-1/2"
       >
         <div className="shrink-0 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
           <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
+            <div
+              className="readlang-selectable min-w-0 cursor-text select-text"
+              data-cue-index={String(cueIndex)}
+            >
               <p className="text-xs font-semibold text-zinc-500">#{cueIndex + 1}</p>
               <p className="mt-1 text-base font-semibold leading-snug text-zinc-900 dark:text-zinc-50">
                 {primary}
@@ -155,6 +181,17 @@ export function CueNoteModal({
               placeholder="「AI 文法・語彙」または直接入力…"
               className="mt-1.5 w-full min-h-[10rem] resize-y rounded-xl border border-amber-200/90 bg-amber-50/40 p-3 text-[15px] leading-relaxed text-zinc-900 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-zinc-100"
             />
+            {grammarDraft.trim() && (
+              <div
+                className="readlang-selectable mt-2 cursor-text select-text rounded-xl border border-dashed border-amber-300/80 bg-amber-50/50 p-3 text-[15px] leading-relaxed text-zinc-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-zinc-100"
+                data-cue-index={String(cueIndex)}
+              >
+                <p className="mb-1 text-[10px] font-semibold text-amber-800 dark:text-amber-300">
+                  タップ / 選択 → Words に追加
+                </p>
+                <p className="whitespace-pre-wrap">{grammarDraft}</p>
+              </div>
+            )}
           </label>
           <label className="block">
             <span className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">

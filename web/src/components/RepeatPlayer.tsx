@@ -772,6 +772,7 @@ export function RepeatPlayer({ mediaId }: Props) {
       {memoOpenIndex != null && cues[memoOpenIndex] && (
         <CueNoteModal
           open
+          mediaId={mediaId}
           cueIndex={memoOpenIndex}
           primary={cues[memoOpenIndex]!.primary}
           translation={cues[memoOpenIndex]!.translation}
