@@ -1,6 +1,7 @@
 import Dexie, { type EntityTable } from "dexie";
 import type {
   FavoriteRecord,
+  GrammarJobRecord,
   MediaMeta,
   TranslationJobRecord,
   VocabNote,
@@ -12,6 +13,7 @@ class ScriptPlayerMetaDb extends Dexie {
   notes!: EntityTable<VocabNote, "id">;
   favorites!: EntityTable<FavoriteRecord, "id">;
   translationJobs!: EntityTable<TranslationJobRecord, "id">;
+  grammarJobs!: EntityTable<GrammarJobRecord, "id">;
 
   constructor() {
     super("scriptPlayerMeta");
@@ -25,6 +27,13 @@ class ScriptPlayerMetaDb extends Dexie {
       notes: "id, mediaId, updatedAt",
       favorites: "id, mediaId, cueIndex",
       translationJobs: "id, mediaId, status, updatedAt",
+    });
+    this.version(3).stores({
+      mediaMeta: "id, createdAt, title",
+      notes: "id, mediaId, updatedAt",
+      favorites: "id, mediaId, cueIndex",
+      translationJobs: "id, mediaId, status, updatedAt",
+      grammarJobs: "id, mediaId, status, updatedAt",
     });
   }
 }

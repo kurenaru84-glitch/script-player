@@ -7,7 +7,7 @@ import {
   favoriteCueIndices,
   getMediaMeta,
   getNote,
-  noteCueIndices,
+  cueNoteFlags,
   saveNote,
   toggleFavorite,
 } from "@/lib/db/clientDb";
@@ -19,6 +19,8 @@ import { loadBilingualSubtitles } from "@/lib/subtitle/loadBilingualSubtitles";
 import { parseSrt } from "@/lib/subtitle/parseSrt";
 import type { BilingualCue } from "@/lib/subtitle/types";
 import { GenerateTranslationSrtButton } from "@/components/GenerateTranslationSrtButton";
+import { GenerateGrammarButton } from "@/components/GenerateGrammarButton";
+import { CueNoteModal } from "@/components/CueNoteModal";
 import {
   PlayerPlaybackSettings,
   type PlaybackSettings,
@@ -58,7 +60,9 @@ export function RepeatPlayer({ mediaId }: Props) {
   const lineRepeatIndexRef = useRef<number | null>(null);
   const lineEndHandledRef = useRef(false);
   const [noteDraft, setNoteDraft] = useState("");
-  const [notedIndices, setNotedIndices] = useState<Set<number>>(new Set());
+  const [grammarDraft, setGrammarDraft] = useState("");
+  const [memoIndices, setMemoIndices] = useState<Set<number>>(new Set());
+  const [grammarIndices, setGrammarIndices] = useState<Set<number>>(new Set());
   const [favoriteIndices, setFavoriteIndices] = useState<Set<number>>(new Set());
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const [favoritePlaylistActive, setFavoritePlaylistActive] = useState(false);
@@ -74,7 +78,6 @@ export function RepeatPlayer({ mediaId }: Props) {
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [pipSupported, setPipSupported] = useState(false);
   const videoLoadGen = useRef(0);
-  const noteFocusedRef = useRef(false);
   const lastScrolledIndex = useRef<number | null>(null);
   const lastActiveIndexRef = useRef<number | null>(null);
   const { markUserPaused, markUserPlay } = useBackgroundPlayback(videoEl);
@@ -92,7 +95,9 @@ export function RepeatPlayer({ mediaId }: Props) {
         }
         setTitle(meta.title);
         setCues(loadBilingualSubtitles(meta).cues);
-        setNotedIndices(await noteCueIndices(mediaId));
+        const flags = await cueNoteFlags(mediaId);
+        setMemoIndices(flags.memo);
+        setGrammarIndices(flags.grammar);
         setFavoriteIndices(await favoriteCueIndices(mediaId));
       } catch (e) {
         setLoadError(e instanceof Error ? e.message : "読み込みに失敗しました");
@@ -171,13 +176,14 @@ export function RepeatPlayer({ mediaId }: Props) {
   useEffect(() => {
     if (memoOpenIndex == null) {
       setNoteDraft("");
+      setGrammarDraft("");
       return;
     }
-    if (noteFocusedRef.current) return;
     const cue = cues[memoOpenIndex];
     if (!cue) return;
     getNote(mediaId, memoOpenIndex).then((n) => {
       setNoteDraft(n?.body ?? "");
+      setGrammarDraft(n?.grammarBody ?? "");
     });
   }, [mediaId, memoOpenIndex, cues]);
 
@@ -413,9 +419,18 @@ export function RepeatPlayer({ mediaId }: Props) {
       primaryLine: cue.primary,
       translationLine: cue.translation,
       body: noteDraft,
+      grammarBody: grammarDraft,
     });
-    setNotedIndices(await noteCueIndices(mediaId));
+    const flags = await cueNoteFlags(mediaId);
+    setMemoIndices(flags.memo);
+    setGrammarIndices(flags.grammar);
   };
+
+  const refreshNoteFlags = useCallback(async () => {
+    const flags = await cueNoteFlags(mediaId);
+    setMemoIndices(flags.memo);
+    setGrammarIndices(flags.grammar);
+  }, [mediaId]);
 
   const copyCueLines = async (index: number) => {
     const cue = cues[index];
@@ -471,6 +486,11 @@ export function RepeatPlayer({ mediaId }: Props) {
               mediaId={mediaId}
               variant="compact"
               onComplete={() => void reloadMetaOnly({ showLoading: false })}
+            />
+            <GenerateGrammarButton
+              mediaId={mediaId}
+              variant="compact"
+              onComplete={() => void refreshNoteFlags()}
             />
             <Link
               href={`/dictation/${mediaId}?cue=${dictationCueParam}`}
@@ -608,7 +628,8 @@ export function RepeatPlayer({ mediaId }: Props) {
             const cue = cues[index]!;
             const speaking = isPlaying && activeIndex === index;
             const selected = selectedIndex === index;
-            const hasNote = notedIndices.has(index);
+            const hasMemo = memoIndices.has(index);
+            const hasGrammar = grammarIndices.has(index);
             const favorite = favoriteIndices.has(index);
             const memoOpen = memoOpenIndex === index;
             return (
@@ -626,10 +647,7 @@ export function RepeatPlayer({ mediaId }: Props) {
                 <div className="flex gap-0.5">
                 <button
                   type="button"
-                  onClick={() => {
-                    playCue(index);
-                    setMemoOpenIndex((prev) => (prev === index ? null : index));
-                  }}
+                  onClick={() => playCue(index)}
                   className="min-w-0 flex-1 px-3 py-3 text-left active:scale-[0.99]"
                 >
                   <div
@@ -643,8 +661,15 @@ export function RepeatPlayer({ mediaId }: Props) {
                         再生中
                       </span>
                     )}
-                    {hasNote && (
-                      <span className="rounded bg-emerald-100 px-1.5 text-emerald-800">メモ</span>
+                    {hasGrammar && (
+                      <span className="rounded bg-amber-100 px-1.5 text-amber-900 dark:bg-amber-900/50 dark:text-amber-100">
+                        文法
+                      </span>
+                    )}
+                    {hasMemo && (
+                      <span className="rounded bg-emerald-100 px-1.5 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-100">
+                        メモ
+                      </span>
                     )}
                   </div>
                   <p
@@ -682,6 +707,18 @@ export function RepeatPlayer({ mediaId }: Props) {
                 </button>
                 <button
                   type="button"
+                  aria-label="メモ・文法"
+                  title="メモ・文法解説"
+                  className="px-2 text-xs text-emerald-700 dark:text-emerald-400"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMemoOpenIndex((prev) => (prev === index ? null : index));
+                  }}
+                >
+                  ✎
+                </button>
+                <button
+                  type="button"
                   aria-label="お気に入り"
                   className="px-2 text-lg leading-none"
                   onClick={async (e) => {
@@ -692,43 +729,26 @@ export function RepeatPlayer({ mediaId }: Props) {
                   {favorite ? "★" : "☆"}
                 </button>
                 </div>
-                {memoOpen && (
-                  <div className="border-t border-emerald-200/80 px-3 py-2 dark:border-emerald-900/60">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-[10px] font-semibold text-emerald-800 dark:text-emerald-300">
-                        メモ #{cue.index}
-                      </p>
-                      {hasNote && (
-                        <span className="text-[10px] text-emerald-700">保存済</span>
-                      )}
-                    </div>
-                    <textarea
-                      value={noteDraft}
-                      onChange={(e) => setNoteDraft(e.target.value)}
-                      onFocus={() => {
-                        noteFocusedRef.current = true;
-                      }}
-                      onBlur={() => {
-                        noteFocusedRef.current = false;
-                      }}
-                      rows={2}
-                      placeholder="このセリフのメモ…"
-                      className="mt-1 w-full rounded-lg border border-emerald-200/80 bg-white p-2 text-sm dark:border-emerald-900 dark:bg-zinc-950"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => void saveCurrentNote()}
-                      className="mt-1 rounded-lg bg-emerald-600 px-3 py-1 text-xs font-medium text-white"
-                    >
-                      メモ保存
-                    </button>
-                  </div>
-                )}
               </div>
             );
           })}
         </div>
       </div>
+
+      {memoOpenIndex != null && cues[memoOpenIndex] && (
+        <CueNoteModal
+          open
+          cueIndex={memoOpenIndex}
+          primary={cues[memoOpenIndex]!.primary}
+          translation={cues[memoOpenIndex]!.translation}
+          noteDraft={noteDraft}
+          grammarDraft={grammarDraft}
+          onNoteChange={setNoteDraft}
+          onGrammarChange={setGrammarDraft}
+          onSave={() => void saveCurrentNote()}
+          onClose={() => setMemoOpenIndex(null)}
+        />
+      )}
     </div>
   );
 }

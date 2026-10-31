@@ -113,6 +113,7 @@ export async function deleteMedia(id: string): Promise<void> {
   await database.mediaMeta.delete(id);
   await database.notes.where("mediaId").equals(id).delete();
   await database.favorites.where("mediaId").equals(id).delete();
+  await database.grammarJobs.where("mediaId").equals(id).delete();
 }
 
 export async function saveNote(input: {
@@ -120,12 +121,19 @@ export async function saveNote(input: {
   cueIndex: number;
   primaryLine: string;
   translationLine: string;
-  body: string;
+  body?: string;
+  grammarBody?: string;
 }): Promise<void> {
   await openMetaDb();
-  const trimmed = input.body.trim();
   const id = noteId(input.mediaId, input.cueIndex);
-  if (!trimmed) {
+  const existing = await getMetaDb().notes.get(id);
+  const body =
+    input.body !== undefined ? input.body.trim() : (existing?.body ?? "");
+  const grammarBody =
+    input.grammarBody !== undefined
+      ? input.grammarBody.trim()
+      : (existing?.grammarBody ?? "");
+  if (!body && !grammarBody) {
     await getMetaDb().notes.delete(id);
     return;
   }
@@ -135,9 +143,24 @@ export async function saveNote(input: {
     cueIndex: input.cueIndex,
     primaryLine: input.primaryLine,
     translationLine: input.translationLine,
-    body: trimmed,
+    body,
+    grammarBody: grammarBody || undefined,
     updatedAt: Date.now(),
   });
+}
+
+export async function cueNoteFlags(
+  mediaId: string,
+): Promise<{ memo: Set<number>; grammar: Set<number> }> {
+  await openMetaDb();
+  const rows = await getMetaDb().notes.where("mediaId").equals(mediaId).toArray();
+  const memo = new Set<number>();
+  const grammar = new Set<number>();
+  for (const r of rows) {
+    if (r.body?.trim()) memo.add(r.cueIndex);
+    if (r.grammarBody?.trim()) grammar.add(r.cueIndex);
+  }
+  return { memo, grammar };
 }
 
 export async function getNote(
@@ -154,9 +177,8 @@ export async function listNotes(): Promise<VocabNote[]> {
 }
 
 export async function noteCueIndices(mediaId: string): Promise<Set<number>> {
-  await openMetaDb();
-  const rows = await getMetaDb().notes.where("mediaId").equals(mediaId).toArray();
-  return new Set(rows.map((r) => r.cueIndex));
+  const { memo, grammar } = await cueNoteFlags(mediaId);
+  return new Set([...memo, ...grammar]);
 }
 
 export async function favoriteCueIndices(mediaId: string): Promise<Set<number>> {

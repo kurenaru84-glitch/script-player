@@ -48,9 +48,16 @@ export default function VocabularyPage() {
                   {note.translationLine}
                 </p>
               )}
-              <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed">
-                {note.body}
-              </p>
+              {note.grammarBody && (
+                <p className="mt-2 whitespace-pre-wrap rounded-lg bg-amber-50/80 p-2 text-sm leading-relaxed text-amber-950 dark:bg-amber-950/30 dark:text-amber-100">
+                  {note.grammarBody}
+                </p>
+              )}
+              {note.body && (
+                <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed">
+                  {note.body}
+                </p>
+              )}
               <p className="mt-2 text-xs text-zinc-400">
                 {new Date(note.updatedAt).toLocaleString()}
               </p>

@@ -17,6 +17,24 @@ export type VocabNote = {
   primaryLine: string;
   translationLine: string;
   body: string;
+  /** AI 文法解説（手動編集可） */
+  grammarBody?: string;
+  updatedAt: number;
+};
+
+/** セリフごとの AI 文法解説ジョブ */
+export type GrammarJobRecord = {
+  id: string;
+  mediaId: string;
+  sourceFingerprint: string;
+  totalCues: number;
+  doneCues: number;
+  lines: string[];
+  status: "running" | "paused" | "done" | "error";
+  errorMessage?: string;
+  consecutiveFailures?: number;
+  lastProgressAt?: number;
+  nextAttemptAt?: number;
   updatedAt: number;
 };
 
