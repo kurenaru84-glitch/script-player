@@ -525,7 +525,7 @@ export function RepeatPlayer({ mediaId }: Props) {
             </Link>
           </div>
           <p className="text-[10px] text-zinc-500">
-            字幕を選択 → 翻訳 → 単語リスト（Readlang 風）
+            語をタップ、またはドラッグ選択 → 翻訳 → Words に追加
           </p>
       </div>
 
@@ -681,7 +681,7 @@ export function RepeatPlayer({ mediaId }: Props) {
                   )}
                 </button>
                 <div
-                  className="readlang-selectable min-w-0 flex-1 px-1 py-3"
+                  className="readlang-selectable min-w-0 flex-1 cursor-text px-1 py-3"
                   data-cue-index={String(index)}
                 >
                   <div className="flex flex-wrap items-center gap-1 text-[10px]">

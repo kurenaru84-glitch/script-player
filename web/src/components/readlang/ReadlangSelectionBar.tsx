@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { addSavedWord } from "@/lib/db/clientDb";
 import { translatePhraseViaApi } from "@/lib/readlang/translatePhraseClient";
@@ -9,6 +9,7 @@ import {
   normalizeSelectedText,
   selectionInsideRoot,
 } from "@/lib/readlang/selectionUtils";
+import { isInteractiveTarget, wordAtPoint } from "@/lib/readlang/wordAtPoint";
 
 export type ReadlangCueContext = {
   cueIndex: number;
@@ -28,7 +29,10 @@ type PendingSelection = {
   text: string;
   cueIndex: number;
   rect: DOMRect;
+  fromTap: boolean;
 };
+
+const TAP_MOVE_PX = 12;
 
 export function ReadlangSelectionBar({
   mediaId,
@@ -42,6 +46,14 @@ export function ReadlangSelectionBar({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const pointerRef = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+
+  const openPending = useCallback((next: PendingSelection) => {
+    setPending(next);
+    setTranslation("");
+    setError(null);
+    setSaved(false);
+  }, []);
 
   const clear = useCallback(() => {
     setPending(null);
@@ -56,11 +68,9 @@ export function ReadlangSelectionBar({
     const root = rootRef.current;
     if (!root) return;
 
-    const onSelectionChange = () => {
+    const applySelection = () => {
       const sel = window.getSelection();
-      if (!sel || sel.isCollapsed || !rootRef.current) {
-        return;
-      }
+      if (!sel || sel.isCollapsed || !rootRef.current) return;
       if (!selectionInsideRoot(sel, rootRef.current)) return;
 
       const text = normalizeSelectedText(sel.toString());
@@ -70,24 +80,76 @@ export function ReadlangSelectionBar({
       if (cueIndex == null) return;
 
       const range = sel.getRangeAt(0);
-      const rect = range.getBoundingClientRect();
-      setPending({ text, cueIndex, rect });
-      setTranslation("");
-      setError(null);
-      setSaved(false);
+      openPending({
+        text,
+        cueIndex,
+        rect: range.getBoundingClientRect(),
+        fromTap: false,
+      });
     };
 
-    const onPointerUp = () => {
-      window.setTimeout(onSelectionChange, 50);
+    const onPointerDown = (e: PointerEvent) => {
+      if (isInteractiveTarget(e.target)) return;
+      pointerRef.current = { x: e.clientX, y: e.clientY, moved: false };
     };
+
+    const onPointerMove = (e: PointerEvent) => {
+      const p = pointerRef.current;
+      if (!p || p.moved) return;
+      const dx = e.clientX - p.x;
+      const dy = e.clientY - p.y;
+      if (dx * dx + dy * dy > TAP_MOVE_PX * TAP_MOVE_PX) p.moved = true;
+    };
+
+    const onPointerUp = (e: PointerEvent) => {
+      const p = pointerRef.current;
+      pointerRef.current = null;
+      if (!p || p.moved || isInteractiveTarget(e.target)) return;
+
+      window.setTimeout(() => {
+        const sel = window.getSelection();
+        if (sel && !sel.isCollapsed) {
+          const selected = normalizeSelectedText(sel.toString());
+          if (selected) {
+            applySelection();
+            return;
+          }
+        }
+
+        const target = e.target;
+        if (!(target instanceof Node) || !rootRef.current?.contains(target)) return;
+        const cueIndex = findCueIndexFromNode(target, rootRef.current);
+        if (cueIndex == null) return;
+
+        const hit = wordAtPoint(e.clientX, e.clientY);
+        if (!hit) return;
+        const cueEl = rootRef.current.querySelector(
+          `.readlang-selectable[data-cue-index="${cueIndex}"]`,
+        );
+        if (!cueEl?.contains(hit.node)) return;
+
+        openPending({
+          text: hit.text,
+          cueIndex,
+          rect: hit.rect,
+          fromTap: true,
+        });
+        sel?.removeAllRanges();
+      }, 40);
+    };
+
+    root.addEventListener("pointerdown", onPointerDown);
+    root.addEventListener("pointermove", onPointerMove);
     root.addEventListener("pointerup", onPointerUp);
+    document.addEventListener("selectionchange", applySelection);
 
-    document.addEventListener("selectionchange", onSelectionChange);
     return () => {
-      document.removeEventListener("selectionchange", onSelectionChange);
+      root.removeEventListener("pointerdown", onPointerDown);
+      root.removeEventListener("pointermove", onPointerMove);
       root.removeEventListener("pointerup", onPointerUp);
+      document.removeEventListener("selectionchange", applySelection);
     };
-  }, [rootRef]);
+  }, [rootRef, openPending]);
 
   useEffect(() => {
     if (!pending) return;
@@ -171,7 +233,7 @@ export function ReadlangSelectionBar({
     >
       <div className="rounded-xl border border-sky-200 bg-white p-3 shadow-xl dark:border-sky-800 dark:bg-zinc-950">
         <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-700 dark:text-sky-300">
-          選択した語句
+          {pending.fromTap ? "タップした語" : "選択した語句"}
         </p>
         <p className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
           {pending.text}
@@ -199,7 +261,7 @@ export function ReadlangSelectionBar({
             onClick={() => void runTranslate()}
             className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
           >
-            {loading ? "翻訳中…" : "翻訳"}
+            {loading ? "翻訳中…" : "再翻訳"}
           </button>
           <button
             type="button"
