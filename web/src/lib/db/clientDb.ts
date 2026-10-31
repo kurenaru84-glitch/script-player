@@ -133,7 +133,7 @@ export async function addSavedWord(input: {
     mediaId: input.mediaId,
     cueIndex: input.cueIndex,
     text: input.text.trim(),
-    translation: input.translation.trim(),
+    translation: (input.translation ?? "").trim(),
     contextPrimary: input.contextPrimary,
     contextTranslation: input.contextTranslation,
     starred: false,
