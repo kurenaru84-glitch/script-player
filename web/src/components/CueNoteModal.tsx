@@ -152,7 +152,7 @@ export function CueNoteModal({
         </div>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-3">
-          <label className="block">
+          <div className="block">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs font-semibold text-amber-800 dark:text-amber-300">
                 文法・語彙（B1+・編集可）
@@ -186,14 +186,14 @@ export function CueNoteModal({
                 className="readlang-selectable mt-2 cursor-text select-text rounded-xl border border-dashed border-amber-300/80 bg-amber-50/50 p-3 text-[15px] leading-relaxed text-zinc-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-zinc-100"
                 data-cue-index={String(cueIndex)}
               >
-                <p className="mb-1 text-[10px] font-semibold text-amber-800 dark:text-amber-300">
+                <p className="pointer-events-none mb-1 text-[10px] font-semibold text-amber-800 dark:text-amber-300">
                   タップ / 選択 → Words に追加
                 </p>
                 <p className="whitespace-pre-wrap">{grammarDraft}</p>
               </div>
             )}
-          </label>
-          <label className="block">
+          </div>
+          <div className="block">
             <span className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">
               自分のメモ
             </span>
@@ -204,7 +204,7 @@ export function CueNoteModal({
               placeholder="単語・覚えたいフレーズ・感想…"
               className="mt-1.5 w-full min-h-[8rem] resize-y rounded-xl border border-emerald-200/90 bg-white p-3 text-[15px] leading-relaxed dark:border-emerald-900/60 dark:bg-zinc-950"
             />
-          </label>
+          </div>
         </div>
 
         <div className="shrink-0 border-t border-zinc-200 px-4 py-3 dark:border-zinc-800">

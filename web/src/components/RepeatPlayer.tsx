@@ -762,12 +762,14 @@ export function RepeatPlayer({ mediaId }: Props) {
         </div>
       </div>
 
-      <ReadlangSelectionBar
-        mediaId={mediaId}
-        sourceLanguage={grammarSourceLanguage}
-        rootRef={readlangRootRef}
-        getCue={getReadlangCue}
-      />
+      {memoOpenIndex == null && (
+        <ReadlangSelectionBar
+          mediaId={mediaId}
+          sourceLanguage={grammarSourceLanguage}
+          rootRef={readlangRootRef}
+          getCue={getReadlangCue}
+        />
+      )}
 
       {memoOpenIndex != null && cues[memoOpenIndex] && (
         <CueNoteModal
