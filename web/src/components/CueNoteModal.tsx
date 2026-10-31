@@ -116,7 +116,7 @@ export function CueNoteModal({
           <label className="block">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs font-semibold text-amber-800 dark:text-amber-300">
-                文法解説（編集可）
+                文法・語彙（B1+・編集可）
               </span>
               <button
                 type="button"
@@ -124,7 +124,7 @@ export function CueNoteModal({
                 onClick={() => void runGrammarAi()}
                 className="rounded-lg bg-amber-600 px-2.5 py-1 text-[11px] font-semibold text-white disabled:opacity-60"
               >
-                {generating ? "生成中…" : "このセリフを AI 解説"}
+                {generating ? "生成中…" : "AI 文法・語彙"}
               </button>
             </div>
             {genError && (
@@ -134,7 +134,7 @@ export function CueNoteModal({
               value={grammarDraft}
               onChange={(e) => onGrammarChange(e.target.value)}
               rows={8}
-              placeholder="「このセリフを AI 解説」または直接入力…"
+              placeholder="「AI 文法・語彙」または直接入力…"
               className="mt-1.5 w-full min-h-[10rem] resize-y rounded-xl border border-amber-200/90 bg-amber-50/40 p-3 text-[15px] leading-relaxed text-zinc-900 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-zinc-100"
             />
           </label>

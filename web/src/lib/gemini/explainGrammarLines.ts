@@ -34,7 +34,11 @@ ${JSON.stringify(payload)}${strictNote}`;
 
 function buildSingleLinePrompt(line: GrammarLineInput, source: string): string {
   const tr = line.translation?.trim();
-  return `${source}字幕の1行について、日本語で文法解説を2〜4文。Markdown・箇条書き・JSON禁止。和訳の繰り返しは不要。
+  return `${source}字幕の1行について、日本語で学習メモを書いてください。Markdown・JSON禁止。和訳の繰り返しは不要。
+
+構成（見出しはそのまま使う）:
+【文法】2〜4文。構文・語順・口語表現に触れる。
+【語彙 B1+】この行に含まれる CEFR B1 以上（中級以上）の語・熟語だけ。各1行「語形 — 簡潔な日本語説明」。A1/A2 の基本語（the, have, go, und, ich など）は書かない。該当語がなければ「（特になし）」のみ。
 
 ${source}: ${line.primary.trim()}${tr ? `\n参考訳: ${tr}` : ""}`;
 }
@@ -49,7 +53,7 @@ export async function explainOneGrammarLine(
   const raw = await geminiGenerateTextWithFallback(prompt, {
     models: grammarGeminiModelChain(),
     maxAttemptsPerModel: 2,
-    maxOutputTokens: 640,
+    maxOutputTokens: 900,
   });
   const text = raw.replace(/^```[\w]*\n?|\n?```$/g, "").trim();
   if (!text) throw new Error("空の解説が返りました");
