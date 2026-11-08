@@ -33,6 +33,11 @@ import {
 } from "@/lib/useBackgroundPlayback";
 import { useMediaSession } from "@/lib/useMediaSession";
 import { shouldHandleLineRepeatEnd } from "@/lib/subtitle/lineRepeatAtTime";
+import { cueIndexToSkipTo } from "@/lib/subtitle/gapSkip";
+import {
+  loadPlaybackSettings,
+  savePlaybackSettings,
+} from "@/lib/playbackSettingsStorage";
 import { ReadlangSelectionBar } from "@/components/readlang/ReadlangSelectionBar";
 
 const PLAYER_HEIGHT = "calc(100dvh - 4.25rem - env(safe-area-inset-bottom, 0px))";
@@ -54,13 +59,15 @@ export function RepeatPlayer({ mediaId }: Props) {
   const [cues, setCues] = useState<BilingualCue[]>([]);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-  const [playback, setPlayback] = useState<PlaybackSettings>({
-    speed: 1.0,
-    lineRepeatCount: 0,
-  });
+  const [playback, setPlayback] = useState<PlaybackSettings>(() =>
+    typeof window === "undefined"
+      ? { speed: 1.0, lineRepeatCount: 0, skipLineGaps: true }
+      : loadPlaybackSettings(),
+  );
   const lineRepeatPassRef = useRef(0);
   const lineRepeatIndexRef = useRef<number | null>(null);
   const lineEndHandledRef = useRef(false);
+  const gapSkipLockRef = useRef<number | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [grammarDraft, setGrammarDraft] = useState("");
   const [memoIndices, setMemoIndices] = useState<Set<number>>(new Set());
@@ -207,6 +214,7 @@ export function RepeatPlayer({ mediaId }: Props) {
       lineRepeatPassRef.current = 0;
       lineRepeatIndexRef.current = index;
       lineEndHandledRef.current = false;
+      gapSkipLockRef.current = null;
       if (!opts?.keepPlaylist) {
         setFavoritePlaylistActive(false);
         playlistQueueRef.current = [];
@@ -310,6 +318,24 @@ export function RepeatPlayer({ mediaId }: Props) {
           playlistStepRef.current = 0;
         }
       }
+      return;
+    }
+
+    if (playback.skipLineGaps && !video.paused) {
+      const skipTo = cueIndexToSkipTo(cues, tMs, active);
+      if (skipTo != null && gapSkipLockRef.current !== skipTo) {
+        const target = cues[skipTo];
+        if (target) {
+          gapSkipLockRef.current = skipTo;
+          video.currentTime = target.startMs / 1000 + 0.02;
+          lastActiveIndexRef.current = skipTo;
+          lineEndHandledRef.current = false;
+          return;
+        }
+      }
+      if (active != null && skipTo == null) {
+        gapSkipLockRef.current = null;
+      }
     }
   }, [
     cues,
@@ -317,6 +343,7 @@ export function RepeatPlayer({ mediaId }: Props) {
     findActiveIndex,
     markUserPaused,
     playback.lineRepeatCount,
+    playback.skipLineGaps,
     playCue,
   ]);
 
@@ -334,6 +361,10 @@ export function RepeatPlayer({ mediaId }: Props) {
       lineRepeatPassRef.current = 0;
     }
   }, [activeIndex, playback.lineRepeatCount, selectedIndex]);
+
+  useEffect(() => {
+    savePlaybackSettings(playback);
+  }, [playback]);
 
   useEffect(() => {
     const video = videoRef.current;

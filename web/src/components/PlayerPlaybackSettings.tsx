@@ -10,6 +10,8 @@ export type PlaybackSettings = {
   speed: (typeof SPEEDS)[number];
   /** 0=オフ、N=同セリフをN回再生してから次へ */
   lineRepeatCount: number;
+  /** セリフ間の無音・OP/ED など字幕なし区間を飛ばす（既定 on） */
+  skipLineGaps: boolean;
 };
 
 type Props = {
@@ -129,6 +131,36 @@ export function PlayerPlaybackSettings({ value, onChange }: Props) {
             現在: 各セリフ {repeatLabel} → 次へ
           </p>
         )}
+        <p className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+          空白スキップ
+        </p>
+        <p className="mt-0.5 text-[10px] leading-snug text-zinc-500">
+          セリフ終了後すぐ次のセリフへ。字幕のない OP/ED も飛ばしやすくなります
+        </p>
+        <div className="mt-2 flex gap-1">
+          <button
+            type="button"
+            onClick={() => onChange({ ...value, skipLineGaps: true })}
+            className={`flex-1 rounded-lg py-1.5 text-xs font-medium ${
+              value.skipLineGaps
+                ? "bg-sky-600 text-white"
+                : "bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200"
+            }`}
+          >
+            オン
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange({ ...value, skipLineGaps: false })}
+            className={`flex-1 rounded-lg py-1.5 text-xs font-medium ${
+              !value.skipLineGaps
+                ? "bg-sky-600 text-white"
+                : "bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200"
+            }`}
+          >
+            オフ
+          </button>
+        </div>
       </div>
     </>
   );
@@ -144,6 +176,7 @@ export function PlayerPlaybackSettings({ value, onChange }: Props) {
         再生設定
         <span className="ml-1 text-zinc-500">
           x{value.speed}
+          {value.skipLineGaps ? " · ⏭" : ""}
           {value.lineRepeatCount > 0 ? ` · 🔁${value.lineRepeatCount}` : ""}
         </span>
       </button>
